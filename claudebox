@@ -27,9 +27,9 @@ LINK_TARGET="/usr/local/bin/claudebox"
 DOCKERFILE="$(mktemp /tmp/claudebox-dockerfile.XXXXXX)"
 NODE_VERSION="--lts"
 USER_ARGS=("$@")
-USER_ARGS+=("--dangerously-skip-permissions")
+# USER_ARGS+=("--dangerously-skip-permissions") # Removed hardcoded flag
 #USER_ARGS+=("--dangerously-enable-sudo")
-USER_ARGS+=("--dangerously-disable-firewall")
+# USER_ARGS+=("--dangerously-disable-firewall") # Removed hardcoded flag
 
 # Color codes
 RED='\033[0;31m'
@@ -40,6 +40,90 @@ PURPLE='\033[0;35m'
 CYAN='\033[0;36m'
 WHITE='\033[1;37m'
 NC='\033[0m' # No Color
+
+# Approval Mechanism
+CLAUDEBOX_AUTO_APPROVE_TIER1="${CLAUDEBOX_AUTO_APPROVE_TIER1:-false}"
+CLAUDEBOX_AUTO_APPROVE_TIER2_DANGEROUS="${CLAUDEBOX_AUTO_APPROVE_TIER2_DANGEROUS:-false}" # For truly headless/scripted use of dangerous ops
+
+confirm_action() {
+    local level="$1"
+    local description="$2"
+    local confirmation_keyword="${3:-}" # For Tier 2, this is mandatory
+    local current_command_name="${USER_ARGS[0]:-}" # Get the command name like 'profile', 'clean', etc.
+
+    # If no specific command (e.g. direct script execution for first time setup), use a generic name
+    if [[ -z "$current_command_name" || "$current_command_name" == -* ]]; then # if it's an option, not a command
+        current_command_name="initial_setup"
+    fi
+
+    local effective_keyword="${confirmation_keyword:-$current_command_name}"
+    if [[ -z "$effective_keyword" ]]; then # Should not happen if keyword is mandatory for Tier 2
+        effective_keyword="proceed"
+    fi
+
+    echo # Newline for readability
+    echo -e "${YELLOW}Confirmation required for 'claudebox ${current_command_name}'${NC}"
+    echo -e "${CYAN}Description: ${description}${NC}"
+
+    local dangerous_flags_active=()
+    for arg in "${USER_ARGS[@]}"; do
+        if [[ "$arg" == "--dangerously-enable-sudo" || "$arg" == "--dangerously-disable-firewall" || "$arg" == "--dangerously-skip-permissions" ]]; then
+            dangerous_flags_active+=("$arg")
+        fi
+    done
+
+    if [[ ${#dangerous_flags_active[@]} -gt 0 ]]; then
+        echo -e "${RED}🔥 NOTICE: The following 'dangerous' flag(s) are active and will be passed to Docker/Claude: ${dangerous_flags_active[*]}${NC}"
+    fi
+
+    if [[ "$level" -eq 1 ]]; then
+        if [[ "$CLAUDEBOX_AUTO_APPROVE_TIER1" == "true" ]]; then
+            echo -e "${GREEN}Tier 1 action automatically approved via CLAUDEBOX_AUTO_APPROVE_TIER1.${NC}"
+            return 0
+        fi
+        read -r -p "Do you want to continue? (y/N): " response
+        if [[ "$response" =~ ^[Yy]$ ]]; then
+            return 0
+        else
+            echo -e "${RED}Action cancelled by user.${NC}"
+            exit 1 # Critical exit, this is a safety mechanism
+        fi
+    elif [[ "$level" -eq 2 ]]; then
+        if [[ "$CLAUDEBOX_AUTO_APPROVE_TIER2_DANGEROUS" == "true" && -n "$confirmation_keyword" ]]; then
+             echo -e "${RED}🔥 Tier 2 action automatically approved via CLAUDEBOX_AUTO_APPROVE_TIER2_DANGEROUS. This is risky. 🔥${NC}"
+             return 0
+        fi
+        echo -e "${RED}⚠️ WARNING: This is a privileged or destructive operation.${NC}"
+        read -r -p "To confirm this action, please type '${effective_keyword}': " response
+        if [[ "$response" == "$effective_keyword" ]]; then
+            return 0
+        else
+            echo -e "${RED}Confirmation failed. Action cancelled.${NC}"
+            exit 1 # Critical exit
+        fi
+    else
+        echo -e "${RED}Developer error: Invalid confirmation level '$level' passed to confirm_action.${NC}"
+        exit 2 # Scripting error
+    fi
+}
+
+# --- Utility Functions ---
+sanitize_input_for_command() {
+    local input="$1"
+    # Allow alphanumeric, underscores, hyphens, periods (for versions like 1.2.3),
+    # colons (for versions like 1:2.3-4), tildes (for versions like 1.2.3~beta)
+    # plus signs (for versions like 1.2.3+build4 or g++-11).
+    # Essentially, characters common in valid package names and versions.
+    # Critical: Disallow spaces, semicolons, pipes, ampersands, backticks, command substitutions like $() etc.
+    if [[ "$input" =~ ^[a-zA-Z0-9_.+:-]+$ ]]; then
+        echo "$input"
+    else
+        # Return empty or some other indicator of invalid input
+        # For now, returning empty and letting the caller handle it.
+        echo ""
+    fi
+}
+# --- End Utility Functions ---
 
 check_docker() {
     if ! command -v docker &> /dev/null; then
@@ -62,15 +146,20 @@ check_docker() {
 # Function to install Docker
 install_docker() {
     echo -e "${YELLOW}Docker is not installed.${NC}"
-    echo -e "${CYAN}Would you like to install Docker now? (y/n)${NC}"
-    read -r response
-    if [[ ! "$response" =~ ^[Yy]$ ]]; then
-        echo -e "${RED}Docker is required for ClaudeBox. Please install Docker and try again.${NC}"
-        echo -e "${YELLOW}Visit: https://docs.docker.com/engine/install/${NC}"
-        exit 1
+    # Tier 1 style confirmation for initial Docker install prompt, but it's a lead-in to Tier 2.
+    # The main Tier 2 confirmation is below.
+    if [[ "$CLAUDEBOX_AUTO_APPROVE_TIER1" != "true" ]]; then # Allow skipping this initial y/n if auto-approving Tier 1
+        echo -e "${CYAN}Would you like to attempt Docker installation now? (y/n)${NC}"
+        read -r response
+        if [[ ! "$response" =~ ^[Yy]$ ]]; then
+            echo -e "${RED}Docker is required for ClaudeBox. Please install Docker and try again.${NC}"
+            echo -e "${YELLOW}Visit: https://docs.docker.com/engine/install/${NC}"
+            exit 1
+        fi
     fi
 
-    echo -e "${BLUE}Installing Docker...${NC}"
+    confirm_action 2 "Install Docker on your system. This requires sudo privileges for package management and system changes." "install_docker"
+    echo -e "${BLUE}Proceeding with Docker installation steps...${NC}"
 
     # Detect OS
     if [[ -f /etc/os-release ]]; then
@@ -83,46 +172,35 @@ install_docker() {
 
     case $OS in
         ubuntu|debian)
-            echo -e "${YELLOW}Installing Docker requires sudo privileges...${NC}"
+            echo -e "${YELLOW}Installing Docker (Debian/Ubuntu) - sudo privileges will be requested by commands below.${NC}"
 
-           # Install prerequisites
             sudo apt-get update
-            sudo apt-get install -y \
-                ca-certificates \
-                curl \
-                gnupg \
-                lsb-release
-
-            # Add Docker's official GPG key
+            sudo apt-get install -y ca-certificates curl gnupg lsb-release
             sudo mkdir -p /etc/apt/keyrings
+            # The curl to gpg and tee commands inherently use sudo if needed by user permissions on target files/dirs
             curl -fsSL https://download.docker.com/linux/$OS/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-
-            # Set up the repository
-            echo \
-                "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/$OS \
-                $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-            # Install Docker Engine
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/$OS $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
             sudo apt-get update
             sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
             ;;
 
         fedora|rhel|centos)
-            echo -e "${YELLOW}Installing Docker requires sudo privileges...${NC}"
+            echo -e "${YELLOW}Installing Docker (Fedora) - sudo privileges will be requested by commands below.${NC}"
 
-            # Install Docker
             sudo dnf -y install dnf-plugins-core
             sudo dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
             sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
-            # Start Docker
+            confirm_action 2 "Start and enable Docker service using systemctl. This requires sudo." "manage_docker_service"
             sudo systemctl start docker
             sudo systemctl enable docker
             ;;
 
         arch|manjaro)
-            echo -e "${YELLOW}Installing Docker requires sudo privileges...${NC}"
+            echo -e "${YELLOW}Installing Docker (Arch) - sudo privileges will be requested by commands below.${NC}"
             sudo pacman -S --noconfirm docker
+
+            confirm_action 2 "Start and enable Docker service using systemctl. This requires sudo." "manage_docker_service"
             sudo systemctl start docker
             sudo systemctl enable docker
             ;;
@@ -143,18 +221,14 @@ install_docker() {
 
 # Function to configure Docker for non-root usage
 configure_docker_nonroot() {
-    echo -e "${YELLOW}Configuring Docker for non-root usage...${NC}"
-    echo -e "${YELLOW}This requires sudo to add you to the docker group...${NC}"
+    confirm_action 2 "Configure Docker for non-root usage by adding user '$USER' to the 'docker' group. This requires sudo for group management." "configure_docker_group"
+    echo -e "${BLUE}Proceeding with Docker non-root configuration...${NC}"
 
-    # Create docker group if it doesn't exist
     if ! getent group docker > /dev/null; then
         sudo groupadd docker
     fi
-
-    # Add current user to docker group
     sudo usermod -aG docker "$USER"
-
-    echo -e "${GREEN}Docker configured for non-root usage!${NC}"
+    echo -e "${GREEN}Docker non-root usage configured!${NC}"
     echo -e "${YELLOW}You need to log out and back in for group changes to take effect.${NC}"
     echo -e "${YELLOW}Or run: ${CYAN}newgrp docker${NC}"
     echo -e "${YELLOW}Then run 'claudebox' again.${NC}"
@@ -195,7 +269,7 @@ case $docker_status in
     2)
         # Docker installed but not running - need sudo to start it
         echo -e "${YELLOW}Docker is installed but not running.${NC}"
-        echo -e "${YELLOW}Starting Docker requires sudo privileges...${NC}"
+        confirm_action 2 "Start Docker service using systemctl. This requires sudo." "manage_docker_service"
         sudo systemctl start docker
         if ! docker info &> /dev/null; then
             echo -e "${RED}Failed to start Docker. Please check your Docker installation.${NC}"
@@ -407,16 +481,381 @@ if [[ "${1:-}" == "profile" ]]; then
     echo -e "${GREEN}Profile installation complete!${NC}"
     exit 0
 fi
+
+# --- MCP Command Handling ---
+MCP_USER_CONFIG_PATH="$HOME/.config/claude/mcp-servers-user.json" # User-specific, distinct from Claude's main config
+MCP_PROJECT_CONFIG_FILENAME=".mcp.json" # Standard project-level config
+
+get_mcp_config_path() {
+    local scope="$1"
+    case "$scope" in
+        project)
+            echo "$PROJECT_DIR/$MCP_PROJECT_CONFIG_FILENAME"
+            ;;
+        user)
+            mkdir -p "$(dirname "$MCP_USER_CONFIG_PATH")" # Ensure directory exists
+            echo "$MCP_USER_CONFIG_PATH"
+            ;;
+        # 'container_default' would refer to the one inside ~/.config/claude/config.json in the image
+        *)
+            echo -e "${RED}Error: Invalid MCP scope '$scope' provided to get_mcp_config_path.${NC}" >&2
+            return 1
+            ;;
+    esac
+    return 0
+}
+
+# Function to ensure an MCP JSON file exists and is valid
+ensure_mcp_json() {
+    local file_path="$1"
+    if [[ ! -f "$file_path" ]]; then
+        echo '{"mcpServers": {}}' > "$file_path"
+    else
+        # Validate if it's proper JSON and has mcpServers object
+        if ! jq -e '.mcpServers' "$file_path" >/dev/null 2>&1; then
+            echo -e "${YELLOW}Warning: MCP file '$file_path' is invalid or does not contain .mcpServers. Initializing with empty mcpServers.{}${NC}" >&2
+            # Backup bad file before overwriting
+            cp "$file_path" "${file_path}.invalid_backup_$(date +%s)"
+            echo '{"mcpServers": {}}' > "$file_path"
+        fi
+    fi
+}
+
+handle_mcp_add() {
+    local server_name=""
+    local server_command=""
+    local server_args_json="[]" # Default to empty JSON array
+    local server_env_json="{}"  # Default to empty JSON object
+    local scope="project" # Default scope
+
+    # Parse arguments for mcp add
+    # Example: claudebox mcp add <name> <command> --args '["--port","8080"]' --env '{"MY_VAR":"val"}' --scope project
+    if [[ -z "${1:-}" ]]; then
+        echo -e "${RED}Error: Server name is required for 'mcp add'.${NC}" >&2; exit 1;
+    fi
+    server_name="$1"; shift
+    if [[ -z "${1:-}" ]]; then
+        echo -e "${RED}Error: Server command is required for 'mcp add'.${NC}" >&2; exit 1;
+    fi
+    server_command="$1"; shift
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --args) server_args_json="$2"; shift 2 ;;
+            --env) server_env_json="$2"; shift 2 ;;
+            --scope) scope="$2"; shift 2 ;;
+            *) echo -e "${RED}Unknown option for 'mcp add': $1${NC}" >&2; exit 1 ;;
+        esac
+    done
+
+    if ! jq -e . >/dev/null 2>&1 <<<"$server_args_json"; then
+        echo -e "${RED}Error: --args value is not valid JSON: $server_args_json${NC}" >&2; exit 1
+    fi
+    if ! jq -e . >/dev/null 2>&1 <<<"$server_env_json"; then
+        echo -e "${RED}Error: --env value is not valid JSON: $server_env_json${NC}" >&2; exit 1
+    fi
+
+    local config_path
+    config_path=$(get_mcp_config_path "$scope")
+    if [[ -z "$config_path" ]]; then exit 1; fi # Error message from get_mcp_config_path
+
+    ensure_mcp_json "$config_path"
+
+    confirm_action 1 "Add/update MCP server '$server_name' in '$scope' scope ($config_path)." "mcp_add"
+
+    # Use jq to add the server configuration
+    jq ".mcpServers.\"$server_name\" = {
+        command: \"$server_command\",
+        args: $server_args_json,
+        env: $server_env_json
+    }" "$config_path" > "${config_path}.tmp" && mv "${config_path}.tmp" "$config_path"
+
+    if [[ $? -eq 0 ]]; then
+        echo -e "${GREEN}MCP server '$server_name' added/updated in '$scope' scope ($config_path).${NC}"
+    else
+        echo -e "${RED}Error: Failed to update MCP config file '$config_path'.${NC}" >&2
+        rm -f "${config_path}.tmp"
+        exit 1
+    fi
+}
+
+handle_mcp_get() {
+    local server_name="${1:-}"
+    local scope_filter="${2:-effective}" # Specific scope or 'effective' to use precedence
+
+    if [[ -z "$server_name" ]]; then
+        echo -e "${RED}Error: Server name is required for 'mcp get'.${NC}" >&2; exit 1;
+    fi
+
+    echo -e "${CYAN}Getting MCP Server '$server_name' (Scope: $scope_filter):${NC}"
+
+    local project_config_path="$PROJECT_DIR/$MCP_PROJECT_CONFIG_FILENAME"
+    local user_config_path
+    user_config_path=$(get_mcp_config_path "user")
+
+    local default_servers_json='{
+        "claudebox_thinking": {
+            "command": "/home/'$DOCKER_USER'/mcp-servers/run-thinking.sh", "args": [], "env": {}
+        },
+        "claudebox_memory": {
+            "command": "/home/'$DOCKER_USER'/mcp-servers/run-memory.sh", "args": [], "env": {"MEMORY_FILE_PATH": "/home/'$DOCKER_USER'/.claudebox/memory.json"}
+        }
+    }'
+    local server_json=""
+    local found_in_scope=""
+
+    if [[ "$scope_filter" == "project" || "$scope_filter" == "effective" ]]; then
+        if [[ -f "$project_config_path" ]]; then
+            ensure_mcp_json "$project_config_path"
+            server_json=$(jq -e ".mcpServers.\"$server_name\"" "$project_config_path" 2>/dev/null)
+            if [[ -n "$server_json" && "$server_json" != "null" ]]; then
+                found_in_scope="Project ($project_config_path)"
+            fi
+        fi
+    fi
+
+    if [[ -z "$found_in_scope" && ( "$scope_filter" == "user" || "$scope_filter" == "effective" ) ]]; then
+        if [[ -f "$user_config_path" ]]; then
+            ensure_mcp_json "$user_config_path"
+            server_json=$(jq -e ".mcpServers.\"$server_name\"" "$user_config_path" 2>/dev/null)
+            if [[ -n "$server_json" && "$server_json" != "null" ]]; then
+                found_in_scope="User ($user_config_path)"
+            fi
+        fi
+    fi
+
+    if [[ -z "$found_in_scope" && ( "$scope_filter" == "container_default" || "$scope_filter" == "effective" ) ]]; then
+        server_json=$(echo "$default_servers_json" | jq -e ".\"$server_name\"" 2>/dev/null)
+        if [[ -n "$server_json" && "$server_json" != "null" ]]; then
+            found_in_scope="Container Default (built-in)"
+        fi
+    fi
+
+    if [[ -n "$found_in_scope" ]]; then
+        echo -e "${PURPLE}Found in: $found_in_scope${NC}"
+        echo "$server_json" | jq . # Pretty print
+    else
+        echo -e "${RED}Server '$server_name' not found in scope '$scope_filter'.${NC}"
+        if [[ "$scope_filter" == "effective" ]]; then
+             echo -e "${YELLOW}Searched Project, User, and Container Default scopes.${NC}"
+        fi
+        exit 1
+    fi
+}
+
+handle_mcp_remove() {
+    local server_name="${1:-}"
+    local scope="${2:-}"
+
+    if [[ -z "$server_name" ]]; then
+        echo -e "${RED}Error: Server name is required for 'mcp remove'.${NC}" >&2; exit 1;
+    fi
+    if [[ -z "$scope" ]]; then
+        echo -e "${RED}Error: --scope (project|user) is required for 'mcp remove'.${NC}" >&2; exit 1;
+    fi
+    if [[ "$scope" != "project" && "$scope" != "user" ]]; then
+        echo -e "${RED}Error: Invalid scope '$scope'. Must be 'project' or 'user' for 'mcp remove'.${NC}" >&2; exit 1;
+    fi
+
+    local config_path
+    config_path=$(get_mcp_config_path "$scope")
+    if [[ -z "$config_path" ]]; then exit 1; fi
+
+    if [[ ! -f "$config_path" ]]; then
+        echo -e "${RED}Error: MCP config file '$config_path' does not exist. Nothing to remove.${NC}" >&2; exit 1;
+    fi
+    ensure_mcp_json "$config_path" # Validate
+
+    # Check if server exists before trying to remove
+    local server_exists
+    server_exists=$(jq -e ".mcpServers.\"$server_name\"" "$config_path" 2>/dev/null)
+    if [[ -z "$server_exists" || "$server_exists" == "null" ]]; then
+        echo -e "${YELLOW}Warning: Server '$server_name' not found in '$config_path'. Nothing to remove.${NC}"
+        exit 0
+    fi
+
+    confirm_action 1 "Remove MCP server '$server_name' from '$scope' scope ($config_path)." "mcp_remove"
+
+    jq "del(.mcpServers.\"$server_name\")" "$config_path" > "${config_path}.tmp" && mv "${config_path}.tmp" "$config_path"
+
+    if [[ $? -eq 0 ]]; then
+        echo -e "${GREEN}MCP server '$server_name' removed from '$scope' scope ($config_path).${NC}"
+    else
+        echo -e "${RED}Error: Failed to update MCP config file '$config_path' during remove.${NC}" >&2
+        rm -f "${config_path}.tmp"
+        exit 1
+    fi
+}
+
+handle_mcp_list() {
+    local scope_filter="${1:-all}" # project, user, all (default)
+    echo -e "${CYAN}Listing MCP Servers (Scope: $scope_filter):${NC}"
+
+    local project_config_path="$PROJECT_DIR/$MCP_PROJECT_CONFIG_FILENAME"
+    local user_config_path
+    user_config_path=$(get_mcp_config_path "user") # To ensure dir exists if we need it
+
+    # Representing claudebox default servers (which are now managed in project .mcp.json by configure_default_project_mcp)
+    # For the purpose of "all" or "container_default" scope listing, we can show what claudebox *would* typically configure.
+    # These names `claudebox_thinking` and `claudebox_memory` are what `configure_default_project_mcp` ensures are present.
+    local default_servers_json='{
+        "claudebox_thinking": {
+            "command": "/home/'$DOCKER_USER'/mcp-servers/run-thinking.sh", "args": [], "env": {}
+        },
+        "claudebox_memory": {
+            "command": "/home/'$DOCKER_USER'/mcp-servers/run-memory.sh", "args": [], "env": {"MEMORY_FILE_PATH": "/home/'$DOCKER_USER'/.claudebox/memory.json"}
+        }
+    }'
+
+    output_servers() {
+        local title="$1"
+        local servers_json="$2"
+        echo -e "${PURPLE}--- $title ---${NC}"
+        if [[ -z "$servers_json" || "$servers_json" == "{}" || "$servers_json" == "null" ]]; then
+            echo "  No servers configured."
+            return
+        fi
+        echo "$servers_json" | jq -r 'to_entries[] | "  \(.key):\n    Command: \(.value.command)\n    Args: \(.value.args | tostring)\n    Env: \(.value.env | tostring)"'
+    }
+
+    declare -A combined_servers=() # Associative array to hold merged servers
+
+    # 1. Load container defaults
+    if [[ "$scope_filter" == "all" ]]; then
+        while IFS="=" read -r key value; do
+            combined_servers["$key"]="$value"
+        done < <(echo "$default_servers_json" | jq -r 'to_entries[] | "\(.key)=\(.value|@json)"')
+    fi
+
+    # 2. Load user servers, potentially overriding defaults
+    if [[ "$scope_filter" == "all" || "$scope_filter" == "user" ]]; then
+        if [[ -f "$user_config_path" ]]; then
+            ensure_mcp_json "$user_config_path" # Validate/initialize
+            user_servers_json=$(jq '.mcpServers' "$user_config_path")
+            if [[ "$user_servers_json" != "null" && "$user_servers_json" != "{}" ]]; then
+                 while IFS="=" read -r key value; do
+                    combined_servers["$key"]="$value"
+                done < <(echo "$user_servers_json" | jq -r 'to_entries[] | "\(.key)=\(.value|@json)"')
+                if [[ "$scope_filter" == "user" ]]; then output_servers "User Scoped ($user_config_path)" "$user_servers_json"; fi
+            elif [[ "$scope_filter" == "user" ]]; then
+                 output_servers "User Scoped ($user_config_path)" "{}"
+            fi
+        elif [[ "$scope_filter" == "user" ]]; then
+            output_servers "User Scoped ($user_config_path - file not found)" "{}"
+        fi
+    fi
+
+    # 3. Load project servers, potentially overriding user/defaults
+    if [[ "$scope_filter" == "all" || "$scope_filter" == "project" ]]; then
+        if [[ -f "$project_config_path" ]]; then
+            ensure_mcp_json "$project_config_path" # Validate/initialize
+            project_servers_json=$(jq '.mcpServers' "$project_config_path")
+             if [[ "$project_servers_json" != "null" && "$project_servers_json" != "{}" ]]; then
+                while IFS="=" read -r key value; do
+                    combined_servers["$key"]="$value"
+                done < <(echo "$project_servers_json" | jq -r 'to_entries[] | "\(.key)=\(.value|@json)"')
+                if [[ "$scope_filter" == "project" ]]; then output_servers "Project Scoped ($project_config_path)" "$project_servers_json"; fi
+            elif [[ "$scope_filter" == "project" ]]; then
+                output_servers "Project Scoped ($project_config_path)" "{}"
+            fi
+        elif [[ "$scope_filter" == "project" ]]; then
+            output_servers "Project Scoped ($project_config_path - file not found)" "{}"
+        fi
+    fi
+
+    if [[ "$scope_filter" == "all" ]]; then
+        echo -e "${PURPLE}--- Combined & Effective (Project > User > Default) ---${NC}"
+        if [[ ${#combined_servers[@]} -eq 0 ]]; then
+            echo "  No servers configured across any scope."
+        else
+            # Convert associative array back to JSON for consistent printing
+            local final_json="{}"
+            for key in "${!combined_servers[@]}"; do
+                final_json=$(echo "$final_json" | jq ". + {\"$key\": ${combined_servers[$key]}}")
+            done
+            output_servers "Combined" "$final_json"
+        fi
+    fi
+}
+
+
+if [[ "${1:-}" == "mcp" ]]; then
+    shift # remove 'mcp'
+    local mcp_command="${1:-}"
+    shift || true # remove subcommand or do nothing if no subcommand
+    case "$mcp_command" in
+        add)
+            handle_mcp_add "$@"
+            ;;
+        get)
+            local server_name_get="${1:-}"
+            local scope_get_val="effective" # Default
+            if [[ "$2" == "--scope" && -n "$3" ]]; then
+                scope_get_val="$3"
+            fi
+            handle_mcp_get "$server_name_get" "$scope_get_val"
+            ;;
+        remove)
+            local server_name_remove="${1:-}"
+            local scope_remove_val=""
+            if [[ "$2" == "--scope" && -n "$3" ]]; then
+                scope_remove_val="$3"
+            else
+                echo -e "${RED}Error: --scope (project|user) is mandatory for 'mcp remove'.${NC}" >&2; exit 1;
+            fi
+            handle_mcp_remove "$server_name_remove" "$scope_remove_val"
+            ;;
+        list)
+            local list_scope="all" # Default
+            if [[ "${1:-}" == "--scope" && -n "${2:-}" ]]; then
+                list_scope="$2"; shift 2;
+            elif [[ -n "${1:-}" && "${1:-}" != --* ]]; then # allow `claudebox mcp list project`
+                list_scope="$1"; shift;
+            fi
+            if [[ $# -gt 0 ]]; then echo -e "${RED}Error: Unknown arguments for 'mcp list': $@${NC}"; exit 1; fi
+            handle_mcp_list "$list_scope"
+            ;;
+        *)
+            echo -e "${RED}Unknown mcp command: ${mcp_command}${NC}" >&2
+            echo "Usage: claudebox mcp [add|get|list|remove] [options]" >&2
+            exit 1
+            ;;
+    esac
+    exit 0
+fi
+
 # Other commands (install, shell, etc.)
 if [[ "${1:-}" == "install" ]]; then
-    shift
-    PACKAGES_TO_INSTALL=("$@")
-    if [[ ${#PACKAGES_TO_INSTALL[@]} -eq 0 ]]; then
-        echo "Error: No packages specified. Usage: claudebox install <package1> <package2> ..."
+    shift # remove 'install'
+
+    local packages_to_install_raw=("$@")
+    local sanitized_packages_to_install=()
+
+    if [[ ${#packages_to_install_raw[@]} -eq 0 ]]; then
+        echo -e "${RED}Error: No packages specified. Usage: claudebox install <package1> <package2> ...${NC}" >&2
         exit 1
     fi
 
-    echo "Installing additional packages: ${PACKAGES_TO_INSTALL[*]}"
+    for pkg_name in "${packages_to_install_raw[@]}"; do
+        local sanitized_name
+        sanitized_name=$(sanitize_input_for_command "$pkg_name")
+        if [[ -n "$sanitized_name" ]]; then
+            sanitized_packages_to_install+=("$sanitized_name")
+        else
+            echo -e "${RED}Error: Invalid package name '$pkg_name'. Contains forbidden characters or is empty.${NC}" >&2
+            echo -e "${YELLOW}Allowed characters are alphanumeric, underscore, hyphen, period, colon, tilde, plus.${NC}" >&2
+            exit 1
+        fi
+    done
+
+    if [[ ${#sanitized_packages_to_install[@]} -eq 0 ]]; then
+        # This case should ideally not be reached if the loop above exits on first invalid
+        echo -e "${RED}Error: No valid package names provided after sanitization.${NC}" >&2
+        exit 1
+    fi
+
+    echo "Attempting to install additional packages: ${sanitized_packages_to_install[*]}"
+    confirm_action 1 "Install additional apt packages (${sanitized_packages_to_install[*]}) into the Docker image." "install_packages"
 
     TEMP_CONTAINER=$(docker create "$IMAGE_NAME" sleep infinity)
     docker start "$TEMP_CONTAINER" >/dev/null
@@ -424,7 +863,7 @@ if [[ "${1:-}" == "install" ]]; then
     docker exec -u root "$TEMP_CONTAINER" bash -c "
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -qq
-        apt-get install -y -qq ${PACKAGES_TO_INSTALL[*]} 2>&1 | grep -v 'invoke-rc.d' | grep -v 'policy-rc.d' || true
+        apt-get install -y -qq ${sanitized_packages_to_install[*]} 2>&1 | grep -v 'invoke-rc.d' | grep -v 'policy-rc.d' || true
         apt-get clean
         rm -rf /var/lib/apt/lists/*
     "
@@ -530,14 +969,16 @@ fi
 if [[ "${1:-}" == "clean" ]]; then
     shift
     if [[ "${1:-}" == "--all" || "${1:-}" == "-a" ]]; then
-        echo -e "${YELLOW}Deep cleaning ClaudeBox and build cache...${NC}"
+        confirm_action 2 "Deep clean ClaudeBox: Remove Docker image '$IMAGE_NAME' and ALL Docker build cache. This is highly destructive and may affect other Docker builds on your system." "clean_all_cache"
+        echo -e "${BLUE}Proceeding with deep clean...${NC}"
         docker rmi -f "$IMAGE_NAME" 2>/dev/null || true
-        docker builder prune -af  # -a removes ALL build cache
+        docker builder prune -af
         echo -e "${GREEN}Deep clean complete!${NC}"
     else
-        echo -e "${YELLOW}Cleaning ClaudeBox...${NC}"
+        confirm_action 1 "Clean ClaudeBox: Remove Docker image '$IMAGE_NAME' and dangling build cache." "clean_image"
+        echo -e "${BLUE}Proceeding with clean...${NC}"
         docker rmi -f "$IMAGE_NAME" 2>/dev/null || true
-        docker builder prune -f   # Only dangling build cache
+        docker builder prune -f
         echo -e "${GREEN}Clean complete!${NC}"
     fi
     docker system df
@@ -553,16 +994,34 @@ if [[ "${1:-}" == "help" || "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
             "$IMAGE_NAME" --help | sed '1s/claude/claudebox/g'
         echo
         echo -e "${WHITE}Added Options:${NC}"
-        echo -e "${CYAN}  --dangerously-enable-sudo       ${WHITE}Enable sudo without password"
-        echo -e "${CYAN}  --dangerously-disable-firewall  ${WHITE}Disable network restrictions"
+        echo -e "${CYAN}  --dangerously-enable-sudo       ${WHITE}Enable NOPASSWD sudo for the container user *inside* the container."
+        echo -e "${CYAN}                                    ${RED}Use with extreme caution.${NC}"
+        echo -e "${CYAN}  --dangerously-disable-firewall  ${WHITE}Disable the container's network firewall (allows all outbound connections)."
+        echo -e "${CYAN}                                    ${RED}Use with extreme caution.${NC}"
+        echo -e "${CYAN}  --dangerously-skip-permissions  ${WHITE}Pass directly to 'claude' CLI; may bypass certain Claude CLI safety checks."
         echo
-        echo -e "${WHITE}Added Commands:"
-        echo -e "  profile [names...]              Install language profiles"
-        echo -e "  install <packages>              Install apt packages"
-        echo -e "  shell                           Open bash shell in container"
-        echo -e "  info                            Show ClaudeBox information"
-        echo -e "  clean                           Remove ClaudeBox image"
-        echo -e "  rebuild                         Rebuild Docker image${NC}"
+        echo -e "${WHITE}Added Commands:${NC}"
+        echo -e "  profile [names...]              Install language profiles into the image."
+        echo -e "  install <pkgs...>               Install apt packages into the image. Package names are sanitized."
+        echo -e "  mcp <add|get|list|remove>       Manage MCP server configurations."
+        echo -e "  shell                           Open a bash shell in the container."
+        echo -e "  info                            Show ClaudeBox information (TODO)."
+        echo -e "  clean [--all]                   Remove ClaudeBox image (and optionally all Docker build cache)."
+        echo -e "  rebuild                         Rebuild Docker image from scratch."
+        echo
+        echo -e "${WHITE}Security Considerations:${NC}"
+        echo -e "  - Operations requiring 'sudo' on the host (like initial Docker setup or symlink creation)"
+        echo -e "    will prompt for confirmation, requiring you to type a keyword."
+        echo -e "  - Modifying the Docker image (profiles, install) will prompt for y/N confirmation."
+        echo -e "  - Use '--dangerously-*' flags with full understanding of their implications."
+        echo -e "  - MCP server commands are defined by you; ensure they are from trusted sources or are safe."
+        echo -e "  - Package names for 'claudebox install' are sanitized to prevent command injection."
+        echo -e "  - For more details, review the script and Dockerfile contents."
+        echo
+        echo -e "${WHITE}Environment Variables for Automation:${NC}"
+        echo -e "  ${CYAN}CLAUDEBOX_AUTO_APPROVE_TIER1=true${NC}          ${WHITE}Auto-approve Tier 1 confirmations (y/N prompts).${NC}"
+        echo -e "  ${CYAN}CLAUDEBOX_AUTO_APPROVE_TIER2_DANGEROUS=true${NC} ${WHITE}Auto-approve Tier 2 confirmations (keyword prompts). ${RED}Highly risky, use with care.${NC}"
+        echo
     else
         echo -e "${CYAN}ClaudeBox - Claude Code Docker Environment${NC}"
         echo
@@ -574,73 +1033,61 @@ if [[ "${1:-}" == "help" || "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 fi
 
 if [[ "${1:-}" == "rebuild" ]]; then
-    docker rmi -f "$IMAGE_NAME" 2>/dev/null || true &
-    show_spinner $! "Wiping ClaudeBox Image Data..."
+    confirm_action 2 "Rebuild ClaudeBox: This will first attempt to remove the existing Docker image '$IMAGE_NAME' (if it exists) and then build a new one." "rebuild_image"
+    echo -e "${BLUE}Proceeding with rebuild...${NC}"
+    if docker image inspect "$IMAGE_NAME" &>/dev/null; then
+        echo -e "${YELLOW}Attempting to remove existing image '$IMAGE_NAME'...${NC}"
+        docker rmi -f "$IMAGE_NAME" 2>/dev/null || true &
+        show_spinner $! "Removing existing image..."
+        echo -e "${GREEN}Finished attempt to remove existing image.${NC}"
+    else
+        echo -e "${BLUE}Image '$IMAGE_NAME' not found, no removal needed before rebuild.${NC}"
+    fi
+    # The actual build will be triggered by the standard image check logic later
 fi
 
 mkdir -p "$CLAUDE_DATA_DIR"
 mkdir -p "$HOME/.claudebox"
 
-# Handle MCP config in workspace
-MCP_BACKUP=""
-EXPECTED_THINKING="/home/$DOCKER_USER/mcp-servers/run-thinking.sh"
-EXPECTED_MEMORY="/home/$DOCKER_USER/mcp-servers/run-memory.sh"
-
-if [[ -f "$PROJECT_DIR/.mcp.json" ]]; then
-    # Check if it's already configured correctly
-    THINKING_CMD=$(jq -r '.mcpServers.thinking.command // ""' "$PROJECT_DIR/.mcp.json" 2>/dev/null || echo "")
-    MEMORY_CMD=$(jq -r '.mcpServers.memory.command // ""' "$PROJECT_DIR/.mcp.json" 2>/dev/null || echo "")
+# Handle ClaudeBox default MCP server configuration in project .mcp.json
+# This needs to be smarter: only add claudebox defaults if they are missing,
+# and don't destroy user-added servers.
+configure_default_project_mcp() {
+    local project_mcp_file="$PROJECT_DIR/$MCP_PROJECT_CONFIG_FILENAME"
+    local claudebox_thinking_server_name="claudebox_thinking"
+    local claudebox_memory_server_name="claudebox_memory"
     
-    if [[ "$THINKING_CMD" != "$EXPECTED_THINKING" ]] || [[ "$MEMORY_CMD" != "$EXPECTED_MEMORY" ]]; then
-        # Different config - back it up and replace
-        MCP_BACKUP="$PROJECT_DIR/.mcp.json.claudebox-backup"
-        cp "$PROJECT_DIR/.mcp.json" "$MCP_BACKUP"
-        echo -e "${BLUE}Backed up existing .mcp.json${NC}"
-        
-        # Create our MCP config
-        cat > "$PROJECT_DIR/.mcp.json" << EOF
-{
-  "mcpServers": {
-    "thinking": {
-      "command": "/home/$DOCKER_USER/mcp-servers/run-thinking.sh",
-      "args": []
-    },
-    "memory": {
-      "command": "/home/$DOCKER_USER/mcp-servers/run-memory.sh",
-      "args": [],
-      "env": {
-        "MEMORY_FILE_PATH": "/home/$DOCKER_USER/.claudebox/memory.json"
-      }
-    }
-  }
-}
-EOF
-        
-        # Set up trap to restore on exit
-        trap 'mv "$MCP_BACKUP" "$PROJECT_DIR/.mcp.json" && echo -e "${BLUE}Restored original .mcp.json${NC}"' EXIT
+    local expected_thinking_cmd="/home/$DOCKER_USER/mcp-servers/run-thinking.sh"
+    local expected_memory_cmd="/home/$DOCKER_USER/mcp-servers/run-memory.sh"
+    local memory_env_json="{\"MEMORY_FILE_PATH\": \"/home/$DOCKER_USER/.claudebox/memory.json\"}"
+
+    ensure_mcp_json "$project_mcp_file" # Ensure file exists and is valid JSON
+
+    local current_config_json
+    current_config_json=$(cat "$project_mcp_file")
+
+    # Check if claudebox_thinking is missing or incorrect
+    if ! echo "$current_config_json" | jq -e ".mcpServers.\"$claudebox_thinking_server_name\" | select(.command == \"$expected_thinking_cmd\")" > /dev/null 2>&1; then
+        echo "$current_config_json" | jq ".mcpServers.\"$claudebox_thinking_server_name\" = {command: \"$expected_thinking_cmd\", args: [], env: {}}" > "${project_mcp_file}.tmp" && mv "${project_mcp_file}.tmp" "$project_mcp_file"
+        current_config_json=$(cat "$project_mcp_file") # Reload
+        echo -e "${BLUE}Configured default '$claudebox_thinking_server_name' in $project_mcp_file${NC}"
     fi
-    # else: already correct, do nothing
-else
-    # No file exists - create it
-    cat > "$PROJECT_DIR/.mcp.json" << EOF
-{
-  "mcpServers": {
-    "thinking": {
-      "command": "/home/$DOCKER_USER/mcp-servers/run-thinking.sh",
-      "args": []
-    },
-    "memory": {
-      "command": "/home/$DOCKER_USER/mcp-servers/run-memory.sh",
-      "args": [],
-      "env": {
-        "MEMORY_FILE_PATH": "/home/$DOCKER_USER/.claudebox/memory.json"
-      }
-    }
-  }
+
+    # Check if claudebox_memory is missing or incorrect
+    if ! echo "$current_config_json" | jq -e ".mcpServers.\"$claudebox_memory_server_name\" | select(.command == \"$expected_memory_cmd\" and .env == $memory_env_json)" > /dev/null 2>&1; then
+         echo "$current_config_json" | jq ".mcpServers.\"$claudebox_memory_server_name\" = {command: \"$expected_memory_cmd\", args: [], env: $memory_env_json}" > "${project_mcp_file}.tmp" && mv "${project_mcp_file}.tmp" "$project_mcp_file"
+        echo -e "${BLUE}Configured default '$claudebox_memory_server_name' in $project_mcp_file${NC}"
+    fi
 }
-EOF
-    echo -e "${GREEN}Created .mcp.json with ClaudeBox MCP servers${NC}"
+
+# Only run default MCP configuration if not an MCP command itself
+if [[ "${USER_ARGS[0]:-}" != "mcp" ]]; then
+    # The old trap logic for .mcp.json backup/restore is removed.
+    # ClaudeBox will now directly manage its named default servers within the project .mcp.json.
+    # Users can add their own servers, and claudebox will ensure its defaults are present without clobbering others.
+    configure_default_project_mcp
 fi
+
 
 # Check if image exists
 first_time=false
@@ -1711,44 +2158,53 @@ progress_install() {
    done &
    PROGRESS_PID=$!
 
+   confirm_action 1 "Build the ClaudeBox Docker image '$IMAGE_NAME'. This may take some time." "build_image"
+   echo -e "${BLUE}Starting Docker image build...${NC}"
+   # Actual build command (verbose output, was already like this)
    docker build \
-       --build-arg USER_ID=$USER_ID \
-       --build-arg GROUP_ID=$GROUP_ID \
-       --build-arg USERNAME=$DOCKER_USER \
+       --build-arg USER_ID="$USER_ID" \
+       --build-arg GROUP_ID="$GROUP_ID" \
+       --build-arg USERNAME="$DOCKER_USER" \
        --build-arg NODE_VERSION="$NODE_VERSION" \
-       -f "$DOCKERFILE" -t "$IMAGE_NAME" "$PROJECT_DIR" 2>&1 >/dev/null
+       -f "$DOCKERFILE" -t "$IMAGE_NAME" "$PROJECT_DIR" 2>&1 | grep -v 'invoke-rc.d' | grep -v 'policy-rc.d' || true
 
-   kill $PROGRESS_PID 2>/dev/null
-   progress_install "Docker image" 100
-   echo -e "\n${GREEN}Complete!${NC}\n"
+   # Ensure spinner finishes and correct message is shown
+   if kill -0 $PROGRESS_PID 2>/dev/null; then # Check if spinner PID is running
+      kill $PROGRESS_PID 2>/dev/null || true # kill it
+      wait $PROGRESS_PID 2>/dev/null || true # wait for it to be reaped
+   fi
+   progress_install "Docker image" 100 # Mark as complete regardless of spinner's actual state due to build output
+   echo # Newline after spinner
 
-   docker build \
-       --build-arg USER_ID=$USER_ID \
-       --build-arg GROUP_ID=$GROUP_ID \
-       --build-arg USERNAME=$DOCKER_USER \
-       --build-arg NODE_VERSION="$NODE_VERSION" \
-       -f "$DOCKERFILE" -t "$IMAGE_NAME" "$PROJECT_DIR" 2>&1 | \
-       grep -v 'invoke-rc.d' | grep -v 'policy-rc.d' || true
+   # Verify image was built
+   if ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
+        echo -e "${RED}Error: Docker image '$IMAGE_NAME' failed to build. Please check the output above.${NC}"
+        rm -f "$DOCKERFILE"
+        exit 1
+   fi
 
    rm -f "$DOCKERFILE"
-
-   echo -e "${GREEN}Docker image '$IMAGE_NAME' built!${NC}"
+   echo -e "${GREEN}Docker image '$IMAGE_NAME' successfully built!${NC}"
    first_time=true
 fi
 
-# Install global symlink if needed (this is the only other place that might need sudo)
-if [[ ! -L "$LINK_TARGET" ]]; then
-   if [[ -w "$(dirname "$LINK_TARGET")" ]]; then
-       # We can write to /usr/local/bin without sudo
-       ln -s "$SCRIPT_PATH" "$LINK_TARGET"
-       echo -e "${GREEN}'claudebox' is now globally available!${NC}"
-   else
-       # We need sudo for the symlink
-       echo -e "${BLUE}Installing global symlink...${NC}"
-       echo -e "${YELLOW}Creating symlink in /usr/local/bin requires sudo...${NC}"
-       sudo ln -s "$SCRIPT_PATH" "$LINK_TARGET"
-       echo -e "${GREEN}'claudebox' is now globally available!${NC}"
-   fi
+# Install global symlink if needed
+if [[ ! -L "$LINK_TARGET" || "$(readlink "$LINK_TARGET")" != "$SCRIPT_PATH" ]]; then
+    echo -e "${BLUE}Global symlink for 'claudebox' needs attention.${NC}"
+    if [[ -w "$(dirname "$LINK_TARGET")" ]]; then
+        confirm_action 1 "Create/update global symlink for 'claudebox' at '$LINK_TARGET'." "create_symlink"
+        # Remove existing if it's a broken symlink or points elsewhere, or a non-symlink file
+        if [[ -e "$LINK_TARGET" ]]; then rm -f "$LINK_TARGET"; fi
+        ln -s "$SCRIPT_PATH" "$LINK_TARGET"
+        echo -e "${GREEN}'claudebox' symlink created/updated at $LINK_TARGET!${NC}"
+    else
+        confirm_action 2 "Create/update global symlink for 'claudebox' at '$LINK_TARGET'. This requires sudo." "create_symlink_sudo"
+        echo -e "${BLUE}Attempting to create/update symlink using sudo...${NC}"
+        # Remove existing if it's a broken symlink or points elsewhere, or a non-symlink file
+        if [[ -e "$LINK_TARGET" ]]; then sudo rm -f "$LINK_TARGET"; fi
+        sudo ln -s "$SCRIPT_PATH" "$LINK_TARGET"
+        echo -e "${GREEN}'claudebox' symlink created/updated at $LINK_TARGET using sudo!${NC}"
+    fi
 fi
 
 # Show welcome message on first run

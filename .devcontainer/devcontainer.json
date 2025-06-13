@@ -1,0 +1,49 @@
+{
+    "name": "ClaudeBox Dev Container",
+    "dockerFile": "Dockerfile",
+    "workspaceFolder": "/workspace",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
+
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "timonwong.shellcheck",         // ShellCheck for Bash linting
+                "ms-azuretools.vscode-docker",  // Docker integration
+                "foxundermoon.shell-format",    // Shell script formatting
+                "bierner.github-markdown-preview" // For README editing
+            ],
+            "settings": {
+                "terminal.integrated.shell.linux": "/bin/bash",
+                "shellformat.path": "/usr/bin/shfmt", // Assuming shfmt is available or to be installed
+                "shellcheck.executablePath": "/usr/bin/shellcheck" // Assuming shellcheck is available
+            }
+        }
+    },
+
+    "features": {
+        // Feature to mount the Docker socket (read-write)
+        "ghcr.io/devcontainers/features/docker-in-docker:2": {
+            "version": "latest",
+            "moby": false, // Don't install Moby, use host Docker
+            "dockerDashComposeVersion": "v2" // Install Docker Compose v2
+        }
+    },
+
+    // Use 'forwardPorts' to make a list of ports inside the container available locally.
+    // "forwardPorts": [],
+
+    // Using postStartCommand to ensure firewall script runs on every start.
+    // It needs to run as root or with sudo, which is handled by how VS Code executes it by default if user is vscode.
+    // However, the script itself uses 'sudo iptables', so it should be fine.
+    // We could also specify user: "root" for this specific command if needed, but let's try default first.
+    "postStartCommand": "if [ -f \"/home/vscode/init-firewall.sh\" ]; then sudo /home/vscode/init-firewall.sh; else echo 'Firewall script not found.'; fi",
+
+    // Set the remote user for the container.
+    "remoteUser": "vscode",
+
+    "runArgs": [
+        "--init", // Runs an init process as PID 1, helps with zombie processes
+        "--cap-add=NET_ADMIN" // Capability needed to manage firewall rules
+        // "--env-file", "${localWorkspaceFolder}/.devcontainer/devcontainer.env" // Example for env file
+    ]
+}

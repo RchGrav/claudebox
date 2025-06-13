@@ -29,17 +29,23 @@ The Ultimate Claude Code Docker Development Environment - Run Claude AI's coding
 - **Enhanced Security**: Network firewall restricting to Anthropic APIs (can be disabled)
 - **15+ Development Profiles**: From embedded systems to machine learning
 - **Visual Progress Indicators**: See exactly what's happening during installation
-- **Smart `.mcp.json` Management**: Automatic backup and restore of existing configurations
+- **Advanced MCP Management**: Manage Model Context Protocol servers with `claudebox mcp [add|get|list|remove]` commands across project and user scopes. ClaudeBox default servers (`claudebox_thinking`, `claudebox_memory`) are intelligently managed in the project's `.mcp.json`.
+- **Enhanced Security & Confirmation**: Interactive confirmations for privileged operations (`sudo`) and image modifications. Input sanitization for package names.
+- **Dev Container Support**: Develop `claudebox` itself in a pre-configured VS Code development container.
 
 ## ✨ Features
 
 - **Containerized Environment**: Run Claude Code in an isolated Docker container
-- **MCP Servers**: Pre-configured Model Context Protocol servers for thinking and memory
-- **Development Profiles**: Pre-configured language stacks (C/C++, Python, Rust, Go, etc.)
-- **Persistent Configuration**: Settings and data persist between sessions
-- **Package Management**: Easy installation of additional development tools
-- **Auto-Setup**: Handles Docker installation and configuration automatically
-- **Security Features**: Network isolation with optional overrides
+- **MCP Servers**: Default `claudebox_thinking` and `claudebox_memory` servers. Full MCP server configuration via `claudebox mcp` commands.
+- **Development Profiles**: Pre-configured language stacks (C/C++, Python, Rust, Go, etc.).
+- **Persistent Configuration**: Settings and data persist between sessions.
+- **Package Management**: Install additional `apt` packages into the image. Package names are sanitized for security.
+- **Auto-Setup**: Handles Docker installation and configuration automatically, with user confirmations for privileged actions.
+- **Security Features**:
+    - Network isolation (iptables firewall) within the container, configurable via flags.
+    - Interactive confirmations for sensitive operations.
+    - Input sanitization for package installation.
+    - User-configurable MCP servers.
 - **Cross-Platform**: Works on Ubuntu, Debian, Fedora, Arch, and more
 
 ## 📋 Prerequisites
@@ -77,10 +83,23 @@ claudebox
 # Pass arguments to Claude
 claudebox --model opus -c
 
-# Get help
-claudebox help          # ClaudeBox specific help
-claudebox --help        # Claude CLI help
+# Get help (provides an overview of commands and security features)
+claudebox help
+# For Claude CLI specific help, run claudebox -- --help (if image is built)
+# or claude --help inside 'claudebox shell'
 ```
+
+### Main Commands
+
+- `claudebox [claude-cli-options]`: Runs the Claude CLI with options.
+- `claudebox profile [list|install name...]`: Manages development profiles.
+- `claudebox install <package1> [package2...]`: Installs additional apt packages into the image.
+- `claudebox mcp <add|get|list|remove> [options]`: Manages MCP server configurations (see details below).
+- `claudebox shell`: Opens a Bash shell inside the container.
+- `claudebox update`: Updates the Claude CLI within the image.
+- `claudebox clean [--all]`: Removes the ClaudeBox Docker image (and optionally all build cache).
+- `claudebox rebuild`: Rebuilds the Docker image from scratch.
+- `claudebox help`: Shows ClaudeBox specific help, including security information.
 
 ### Development Profiles
 
@@ -115,14 +134,53 @@ claudebox profile rust go         # Rust + Go
 - **security** - Security Tools (nmap, tcpdump, wireshark, penetration testing)
 - **ml** - Machine Learning (PyTorch, TensorFlow, scikit-learn, transformers)
 
-### MCP Servers
+### MCP Server Management (`claudebox mcp`)
 
-ClaudeBox includes two powerful MCP servers:
+ClaudeBox provides robust tools for managing Model Context Protocol (MCP) server configurations. These configurations tell the Claude CLI how to launch and use custom tools or "servers" that can extend Claude's capabilities.
 
-1. **Sequential Thinking Server** - For complex problem-solving with revision capabilities
-2. **Memory Server** - Knowledge graph for persistent memory across sessions
+**Scopes:**
+MCP configurations can exist in different scopes, with the following precedence (higher overrides lower):
+1.  **Project Scope:** Defined in `.mcp.json` in your current project directory. Ideal for project-specific tools.
+2.  **User Scope:** Defined in `~/.config/claude/mcp-servers-user.json`. For tools you want available across all your projects. This is a ClaudeBox-specific user file, separate from Claude CLI's own global config.
+3.  **ClaudeBox Defaults:** `claudebox_thinking` and `claudebox_memory` servers are automatically configured in the project's `.mcp.json` if not already present. These provide built-in sequential thinking and memory capabilities.
 
-These are automatically configured and available to Claude within the container.
+**Commands:**
+
+-   **`claudebox mcp list [--scope project|user|all]`**
+    *   Lists MCP servers.
+    *   `--scope project`: Shows only servers from `./.mcp.json`.
+    *   `--scope user`: Shows only servers from `~/.config/claude/mcp-servers-user.json`.
+    *   `--scope all` (or no scope): Shows a combined list reflecting the precedence (Project > User > ClaudeBox Defaults).
+
+-   **`claudebox mcp add <name> <command> [--args JSON_ARRAY] [--env JSON_OBJECT] [--scope project|user]`**
+    *   Adds or updates an MCP server configuration.
+    *   `<name>`: A unique name for the server (e.g., `my_custom_tool`).
+    *   `<command>`: The command to execute for this server (e.g., `/workspace/tools/my_tool_server.py`).
+    *   `--args '["--port", "8080"]'`: Optional JSON array of arguments for the command.
+    *   `--env '{"MY_VAR": "value"}'`: Optional JSON object of environment variables for the command.
+    *   `--scope project` (default): Adds to `./.mcp.json`.
+    *   `--scope user`: Adds to `~/.config/claude/mcp-servers-user.json`.
+
+-   **`claudebox mcp get <name> [--scope project|user|container_default|effective]`**
+    *   Retrieves and displays the configuration for a specific server.
+    *   `--scope effective` (default): Shows the configuration that would actually be used, respecting precedence.
+    *   Other scopes show the definition from that specific file or the built-in default.
+
+-   **`claudebox mcp remove <name> --scope project|user`**
+    *   Removes an MCP server configuration.
+    *   `--scope` is mandatory to prevent accidental deletion.
+
+**Example:**
+```bash
+# Add a project-specific Python tool
+claudebox mcp add mypy_checker /usr/bin/python3 --args '["/workspace/tools/mypy_runner.py"]' --scope project
+
+# List all effective MCP servers
+claudebox mcp list
+
+# Get the configuration for the memory server
+claudebox mcp get claudebox_memory --scope effective
+```
 
 ### Package Management
 
@@ -140,13 +198,18 @@ claudebox update
 ### Security Options
 
 ```bash
-# Run with sudo enabled (use with caution)
+# Enable NOPASSWD sudo for the 'claude' user *inside* the container.
+# This does NOT affect your host system's sudo.
+# Use with extreme caution, as it allows root privileges within the container.
 claudebox --dangerously-enable-sudo
 
-# Disable network firewall (allows all network access)
+# Disable the container's network firewall, allowing all outbound connections
+# from the container. The default firewall restricts access to Anthropic APIs and common package repos.
+# Use with extreme caution.
 claudebox --dangerously-disable-firewall
 
-# Skip permission checks
+# Pass the --dangerously-skip-permissions flag directly to the Claude CLI.
+# This may bypass certain safety checks within the Claude CLI itself.
 claudebox --dangerously-skip-permissions
 ```
 
@@ -175,12 +238,38 @@ ClaudeBox stores data in:
 - `ANTHROPIC_API_KEY` - Your Anthropic API key
 - `NODE_ENV` - Node environment (default: production)
 
-### MCP Configuration
+### MCP Configuration (Legacy Note)
 
-ClaudeBox automatically manages `.mcp.json` in your workspace:
-- Creates configuration if none exists
-- Backs up existing configurations
-- Restores original on exit
+Previously, ClaudeBox used a backup/restore mechanism for a single project-level `.mcp.json`. This has been upgraded. ClaudeBox now intelligently manages its default servers (`claudebox_thinking`, `claudebox_memory`) within the project's `.mcp.json` without overwriting other user-defined servers in that file. Users can also manage a separate user-level configuration file. See the "MCP Server Management" section for details on the new `claudebox mcp` commands.
+
+## 🛡️ Security
+
+ClaudeBox is designed with security in mind, but it's important to understand its features and your responsibilities:
+
+-   **Confirmations for Sensitive Actions**:
+    *   **Tier 1 (y/N confirmation)**: Operations that modify the Docker image (e.g., `claudebox profile ...`, `claudebox install ...`) or make significant non-system changes will ask for a `y/N` confirmation.
+    *   **Tier 2 (Keyword confirmation)**: Operations requiring `sudo` on your host machine (e.g., initial Docker installation, Docker group configuration, global symlink creation) or performing potentially destructive actions (e.g., `claudebox clean --all`) will require you to type a specific keyword to proceed.
+    *   These confirmations can be bypassed for automated environments using environment variables (use with caution):
+        *   `export CLAUDEBOX_AUTO_APPROVE_TIER1=true` (for y/N prompts)
+        *   `export CLAUDEBOX_AUTO_APPROVE_TIER2_DANGEROUS=true` (for keyword prompts - **highly risky**)
+
+-   **Input Sanitization**:
+    *   Package names provided to `claudebox install` are sanitized to allow only typical characters (alphanumeric, `_`, `-`, `.`, `:`, `~`, `+`) to prevent command injection.
+
+-   **Dangerous Flags**:
+    *   Flags like `--dangerously-enable-sudo` (for sudo *inside* the container) and `--dangerously-disable-firewall` significantly alter the container's security posture. Understand the risks before using them. The `confirm_action` prompt will notify you if these flags are active.
+
+-   **MCP Server Commands**:
+    *   You define the commands for custom MCP servers. Ensure these commands are from trusted sources or are safe, as they will be executed by the Claude CLI within the container.
+
+-   **Container Network Firewall**:
+    *   By default, the ClaudeBox container runs with a network firewall (`iptables`) that restricts outbound connections primarily to Anthropic APIs, common package repositories, and other essential services for development. This can be disabled with `--dangerously-disable-firewall`.
+
+-   **Docker Socket Access**:
+    *   ClaudeBox interacts with your host's Docker socket to manage its own image and containers. This is a powerful privilege; ensure no malicious software has replaced your `claudebox` script.
+
+-   **Review**:
+    *   Users are encouraged to review the `claudebox` script and the generated Dockerfile (e.g., via `docker history claudebox`) to understand the operations being performed.
 
 ## 🏗️ Architecture
 
@@ -192,9 +281,30 @@ ClaudeBox creates a Debian-based Docker image with:
 - Network firewall (Anthropic-only by default)
 - Volume mounts for workspace and configuration
 
+## 🧑‍💻 Development
+
+ClaudeBox includes a development container setup for VS Code, providing a consistent environment for working on the `claudebox` script itself.
+
+**Prerequisites:**
+- VS Code
+- Docker Desktop
+- VS Code "Dev Containers" extension (ID: `ms-vscode-remote.remote-containers`)
+
+**Setup:**
+1. Clone this repository.
+2. Open the repository root in VS Code.
+3. VS Code should prompt you to "Reopen in Container". Click it.
+
+**Features:**
+- Ubuntu-based container with necessary tools pre-installed (`bash`, `curl`, `git`, `jq`, `shellcheck`, `shfmt`, `iptables`).
+- The `claudebox` script from your workspace is available as `claudebox-dev` within the dev container for testing.
+- Docker-in-Docker support: The host Docker socket is mounted, allowing you to run and test `claudebox-dev` commands that interact with Docker (e.g., building images, running containers).
+- Pre-configured VS Code extensions for Bash scripting, Docker integration, and Markdown.
+- **Dev Container Firewall**: A restrictive firewall (`.devcontainer/init-firewall.sh`) is applied when the dev container starts, limiting its outbound network access to essential domains (Anthropic, GitHub, package repos, VS Code services). This helps test `claudebox` in a more controlled network setting and enhances the security of the development environment itself.
+
 ## 🤝 Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome! Please feel free to submit a Pull Request. See the "Development" section for information on setting up a development environment.
 
 ## 📝 License
 
