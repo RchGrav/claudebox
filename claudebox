@@ -378,6 +378,177 @@ EOF
     info "Created Claude agent command template"
 }
 
+# Create files to copy into the image
+create_build_files() {
+    local build_context="$1"
+
+    cat > "$build_context/init-firewall.sh" << 'EOF'
+#!/bin/bash
+set -euo pipefail
+if [ "${DISABLE_FIREWALL:-false}" = "true" ]; then
+    echo "Firewall disabled, skipping setup"
+    rm -f "$0"
+    exit 0
+fi
+iptables -F OUTPUT 2>/dev/null || true
+iptables -F INPUT 2>/dev/null || true
+iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
+iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT
+iptables -A INPUT -p udp --sport 53 -j ACCEPT
+iptables -A OUTPUT -o lo -j ACCEPT
+iptables -A INPUT -i lo -j ACCEPT
+iptables -A OUTPUT -s 127.0.0.0/8 -d 127.0.0.0/8 -j ACCEPT
+iptables -A INPUT -s 127.0.0.0/8 -d 127.0.0.0/8 -j ACCEPT
+iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+# Default allowed domains
+DEFAULT_DOMAINS="api.anthropic.com console.anthropic.com statsig.anthropic.com sentry.io"
+
+# Read additional domains from allowlist file if it exists
+ALLOWED_DOMAINS="$DEFAULT_DOMAINS"
+# Try project-specific allowlist first, then fall back to global
+if [ -f /home/DOCKERUSER/.claudebox-project/firewall/allowlist ]; then
+    echo "Loading project-specific allowlist"
+    while IFS= read -r domain; do
+        # Skip comments and empty lines
+        [[ "$domain" =~ ^#.* ]] && continue
+        [[ -z "$domain" ]] && continue
+        # Remove wildcards for now (*.example.com becomes example.com)
+        domain="${domain#\*.}"
+        ALLOWED_DOMAINS="$ALLOWED_DOMAINS $domain"
+    done < /home/DOCKERUSER/.claudebox-project/firewall/allowlist
+elif [ -f /home/DOCKERUSER/.claudebox/allowlist ]; then
+    echo "Loading global allowlist from .claudebox/allowlist"
+    while IFS= read -r domain; do
+        # Skip comments and empty lines
+        [[ "$domain" =~ ^#.* ]] && continue
+        [[ -z "$domain" ]] && continue
+        # Remove wildcards for now (*.example.com becomes example.com)
+        domain="${domain#\*.}"
+        ALLOWED_DOMAINS="$ALLOWED_DOMAINS $domain"
+    done < /home/DOCKERUSER/.claudebox/allowlist
+fi
+
+if command -v ipset >/dev/null 2>&1; then
+    ipset destroy allowed-domains 2>/dev/null || true
+    ipset create allowed-domains hash:net
+    ipset destroy allowed-ips 2>/dev/null || true
+    ipset create allowed-ips hash:net
+
+    for domain in $ALLOWED_DOMAINS; do
+        # Check if it's an IP range
+        if [[ "$domain" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$ ]]; then
+            ipset add allowed-ips $domain 2>/dev/null || true
+        else
+            # It's a domain, resolve it
+            ips=$(getent hosts $domain 2>/dev/null | awk '{print $1}')
+            for ip in $ips; do
+                ipset add allowed-domains $ip 2>/dev/null || true
+            done
+        fi
+    done
+    iptables -A OUTPUT -m set --match-set allowed-domains dst -j ACCEPT
+    iptables -A OUTPUT -m set --match-set allowed-ips dst -j ACCEPT
+else
+    # Fallback without ipset
+    for domain in $ALLOWED_DOMAINS; do
+        if [[ "$domain" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$ ]]; then
+            iptables -A OUTPUT -d $domain -j ACCEPT
+        else
+            # Resolve domain to IPs
+            ips=$(getent hosts $domain 2>/dev/null | awk '{print $1}')
+            for ip in $ips; do
+                iptables -A OUTPUT -d $ip -j ACCEPT
+            done
+        fi
+    done
+fi
+iptables -P OUTPUT DROP
+iptables -P INPUT DROP
+echo "Firewall initialized with Anthropic-only access"
+rm -f "$0"
+EOF
+
+    cat > "$build_context/claude-wrapper" << 'EOF'
+#!/bin/bash
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+nvm use default >/dev/null 2>&1
+# Use MCP config if it exists
+if [ -f "$HOME/.claudebox/.mcp.json" ]; then
+    exec claude --mcp-config "$HOME/.claudebox/.mcp.json" "$@"
+else
+    exec claude "$@"
+fi
+EOF
+
+    cat > "$build_context/docker-entrypoint.sh" << 'EOF'
+#!/bin/bash
+ENABLE_SUDO=false
+DISABLE_FIREWALL=false
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --dangerously-enable-sudo) ENABLE_SUDO=true; shift ;;
+        --dangerously-disable-firewall) DISABLE_FIREWALL=true; shift ;;
+        *) break ;;
+    esac
+done
+export DISABLE_FIREWALL
+
+# Set up project-specific symlinks
+if [ -d /home/DOCKERUSER/.claudebox-project ]; then
+    # Ensure memory directory is accessible
+    mkdir -p /home/DOCKERUSER/.claudebox-project/memory
+    chown -R DOCKERUSER:DOCKERUSER /home/DOCKERUSER/.claudebox-project
+fi
+
+if [ -f /home/DOCKERUSER/init-firewall.sh ]; then
+    /home/DOCKERUSER/init-firewall.sh || true
+fi
+if [ "$ENABLE_SUDO" = "true" ]; then
+    echo "DOCKERUSER ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/DOCKERUSER
+    chmod 0440 /etc/sudoers.d/DOCKERUSER
+fi
+
+if [ -n "$CLAUDEBOX_PROJECT_DIR" ]; then
+    PROFILE_FILE="/home/DOCKERUSER/.claudebox/profiles/$(echo "$CLAUDEBOX_PROJECT_DIR" | sed 's|/|-|g' | sed 's|^-||').ini"
+
+    if command -v uv >/dev/null 2>&1 && [ -f "$PROFILE_FILE" ] && grep -q "python" "$PROFILE_FILE"; then
+        if [ ! -d /home/DOCKERUSER/.claudebox-project/.venv ]; then
+            su - DOCKERUSER -c "uv venv /home/DOCKERUSER/.claudebox-project/.venv"
+            if [ -f /workspace/pyproject.toml ]; then
+                su - DOCKERUSER -c "cd /workspace && uv sync"
+            else
+                su - DOCKERUSER -c "uv pip install --python /home/DOCKERUSER/.claudebox-project/.venv/bin/python ipython black pylint mypy flake8 pytest ruff"
+            fi
+        fi
+
+        for shell_rc in /home/DOCKERUSER/.zshrc /home/DOCKERUSER/.bashrc; do
+            if ! grep -q "source /home/DOCKERUSER/.claudebox-project/.venv/bin/activate" "$shell_rc"; then
+                echo 'if [ -f /home/DOCKERUSER/.claudebox-project/.venv/bin/activate ]; then source /home/DOCKERUSER/.claudebox-project/.venv/bin/activate; fi' >> "$shell_rc"
+            fi
+        done
+    fi
+fi
+
+cd /home/DOCKERUSER
+# Check if we're in shell mode
+if [[ "$1" == "--shell-mode" ]]; then
+    shift  # Remove --shell-mode flag
+    exec su DOCKERUSER -c "source /home/DOCKERUSER/.nvm/nvm.sh && cd /workspace && exec /bin/zsh"
+else
+    # Build command with properly quoted arguments
+    cmd="cd /workspace && /home/DOCKERUSER/claude-wrapper"
+    for arg in "$@"; do
+        # Escape single quotes in the argument
+        escaped_arg=$(echo "$arg" | sed "s/'/'\\\\''/g")
+        cmd="$cmd '$escaped_arg'"
+    done
+    exec su DOCKERUSER -c "$cmd"
+fi
+EOF
+}
+
 run_docker_build() {
     info "Running docker build..."
     docker build \
@@ -385,7 +556,7 @@ run_docker_build() {
         --build-arg GROUP_ID="$GROUP_ID" \
         --build-arg USERNAME="$DOCKER_USER" \
         --build-arg NODE_VERSION="$NODE_VERSION" \
-        -f "$1" -t "$IMAGE_NAME" "$PROJECT_DIR"
+        -f "$1" -t "$IMAGE_NAME" "$2"
 }
 
 # Main execution
@@ -862,9 +1033,13 @@ main() {
     # Build image if needed
     if [[ "$need_rebuild" == "true" ]] || ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
         logo
-        local dockerfile
-        dockerfile=$(mktemp /tmp/claudebox-dockerfile.XXXXXX)
-        trap "rm -f '$dockerfile'" EXIT
+        local build_context
+        build_context=$(mktemp -d /tmp/claudebox-build.XXXXXX)
+        local dockerfile="$build_context/Dockerfile"
+        trap "rm -rf '$build_context'" EXIT
+
+        # Create files locally first
+        create_build_files "$build_context"
 
         cat > "$dockerfile" <<'DOCKERFILE'
 FROM debian:bookworm
@@ -978,94 +1153,8 @@ RUN bash -c "source $NVM_DIR/nvm.sh && \
     nvm use default && \
     npm install -g @anthropic-ai/claude-code"
 
-RUN cat > ~/init-firewall.sh <<'EOF'
-#!/bin/bash
-set -euo pipefail
-if [ "\${DISABLE_FIREWALL:-false}" = "true" ]; then
-    echo "Firewall disabled, skipping setup"
-    rm -f "\$0"
-    exit 0
-fi
-iptables -F OUTPUT 2>/dev/null || true
-iptables -F INPUT 2>/dev/null || true
-iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
-iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT
-iptables -A INPUT -p udp --sport 53 -j ACCEPT
-iptables -A OUTPUT -o lo -j ACCEPT
-iptables -A INPUT -i lo -j ACCEPT
-iptables -A OUTPUT -s 127.0.0.0/8 -d 127.0.0.0/8 -j ACCEPT
-iptables -A INPUT -s 127.0.0.0/8 -d 127.0.0.0/8 -j ACCEPT
-iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
-iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
-# Default allowed domains
-DEFAULT_DOMAINS="api.anthropic.com console.anthropic.com statsig.anthropic.com sentry.io"
-
-# Read additional domains from allowlist file if it exists
-ALLOWED_DOMAINS="\$DEFAULT_DOMAINS"
-# Try project-specific allowlist first, then fall back to global
-if [ -f /home/$USERNAME/.claudebox-project/firewall/allowlist ]; then
-    echo "Loading project-specific allowlist"
-    while IFS= read -r domain; do
-        # Skip comments and empty lines
-        [[ "\$domain" =~ ^#.* ]] && continue
-        [[ -z "\$domain" ]] && continue
-        # Remove wildcards for now (*.example.com becomes example.com)
-        domain="\${domain#\*.}"
-        ALLOWED_DOMAINS="\$ALLOWED_DOMAINS \$domain"
-    done < /home/$USERNAME/.claudebox-project/firewall/allowlist
-elif [ -f /home/$USERNAME/.claudebox/allowlist ]; then
-    echo "Loading global allowlist from .claudebox/allowlist"
-    while IFS= read -r domain; do
-        # Skip comments and empty lines
-        [[ "\$domain" =~ ^#.* ]] && continue
-        [[ -z "\$domain" ]] && continue
-        # Remove wildcards for now (*.example.com becomes example.com)
-        domain="\${domain#\*.}"
-        ALLOWED_DOMAINS="\$ALLOWED_DOMAINS \$domain"
-    done < /home/$USERNAME/.claudebox/allowlist
-fi
-
-if command -v ipset >/dev/null 2>&1; then
-    ipset destroy allowed-domains 2>/dev/null || true
-    ipset create allowed-domains hash:net
-    ipset destroy allowed-ips 2>/dev/null || true
-    ipset create allowed-ips hash:net
-
-    for domain in \$ALLOWED_DOMAINS; do
-        # Check if it's an IP range
-        if [[ "\$domain" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+\$ ]]; then
-            ipset add allowed-ips \$domain 2>/dev/null || true
-        else
-            # It's a domain, resolve it
-            ips=\$(getent hosts \$domain 2>/dev/null | awk '{print \$1}')
-            for ip in \$ips; do
-                ipset add allowed-domains \$ip 2>/dev/null || true
-            done
-        fi
-    done
-    iptables -A OUTPUT -m set --match-set allowed-domains dst -j ACCEPT
-    iptables -A OUTPUT -m set --match-set allowed-ips dst -j ACCEPT
-else
-    # Fallback without ipset
-    for domain in \$ALLOWED_DOMAINS; do
-        if [[ "$domain" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$ ]]; then
-            iptables -A OUTPUT -d $domain -j ACCEPT
-        else
-            # Resolve domain to IPs
-            ips=\$(getent hosts \$domain 2>/dev/null | awk '{print \$1}')
-            for ip in \$ips; do
-                iptables -A OUTPUT -d \$ip -j ACCEPT
-            done
-        fi
-    done
-fi
-iptables -P OUTPUT DROP
-iptables -P INPUT DROP
-echo "Firewall initialized with Anthropic-only access"
-rm -f "\$0"
-EOF
-
-RUN chmod +x ~/init-firewall.sh
+# Copy firewall script
+COPY --chown=$USERNAME --chmod=755 init-firewall.sh /home/$USERNAME/init-firewall.sh
 
 # Install profile packages as separate layers for better caching
 USER root
@@ -1177,87 +1266,14 @@ USER $USERNAME
 
 RUN bash -c "source $NVM_DIR/nvm.sh && claude --version"
 
-RUN echo '#!/bin/bash' > ~/claude-wrapper && \
-   echo 'export NVM_DIR="$HOME/.nvm"' >> ~/claude-wrapper && \
-   echo '[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"' >> ~/claude-wrapper && \
-   echo 'nvm use default >/dev/null 2>&1' >> ~/claude-wrapper && \
-   echo '# Use MCP config if it exists' >> ~/claude-wrapper && \
-   echo 'if [ -f "$HOME/.claudebox/.mcp.json" ]; then' >> ~/claude-wrapper && \
-   echo '    exec claude --mcp-config "$HOME/.claudebox/.mcp.json" "$@"' >> ~/claude-wrapper && \
-   echo 'else' >> ~/claude-wrapper && \
-   echo '    exec claude "$@"' >> ~/claude-wrapper && \
-   echo 'fi' >> ~/claude-wrapper && \
-   chmod +x ~/claude-wrapper
+# Copy Claude wrapper script
+COPY --chown=$USERNAME --chmod=755 claude-wrapper /home/$USERNAME/claude-wrapper
 
 WORKDIR /workspace
 
 USER root
-RUN cat > /usr/local/bin/docker-entrypoint << 'EOF'
-#!/bin/bash
-ENABLE_SUDO=false
-DISABLE_FIREWALL=false
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --dangerously-enable-sudo) ENABLE_SUDO=true; shift ;;
-        --dangerously-disable-firewall) DISABLE_FIREWALL=true; shift ;;
-        *) break ;;
-    esac
-done
-export DISABLE_FIREWALL
-
-# Set up project-specific symlinks
-if [ -d /home/$USERNAME/.claudebox-project ]; then
-    # Ensure memory directory is accessible
-    mkdir -p /home/$USERNAME/.claudebox-project/memory
-    chown -R $USERNAME:$USERNAME /home/$USERNAME/.claudebox-project
-fi
-
-if [ -f /home/DOCKERUSER/init-firewall.sh ]; then
-    /home/DOCKERUSER/init-firewall.sh || true
-fi
-if [ "$ENABLE_SUDO" = "true" ]; then
-    echo "DOCKERUSER ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/DOCKERUSER
-    chmod 0440 /etc/sudoers.d/DOCKERUSER
-fi
-
-if [ -n "$CLAUDEBOX_PROJECT_DIR" ]; then
-    PROFILE_FILE="/home/DOCKERUSER/.claudebox/profiles/$(echo "$CLAUDEBOX_PROJECT_DIR" | sed 's|/|-|g' | sed 's|^-||').ini"
-
-    if command -v uv >/dev/null 2>&1 && [ -f "$PROFILE_FILE" ] && grep -q "python" "$PROFILE_FILE"; then
-        if [ ! -d /home/DOCKERUSER/.claudebox-project/.venv ]; then
-            su - DOCKERUSER -c "uv venv /home/DOCKERUSER/.claudebox-project/.venv"
-            if [ -f /workspace/pyproject.toml ]; then
-                su - DOCKERUSER -c "cd /workspace && uv sync"
-            else
-                su - DOCKERUSER -c "uv pip install --python /home/DOCKERUSER/.claudebox-project/.venv/bin/python ipython black pylint mypy flake8 pytest ruff"
-            fi
-        fi
-
-        for shell_rc in /home/DOCKERUSER/.zshrc /home/DOCKERUSER/.bashrc; do
-            if ! grep -q "source /home/DOCKERUSER/.claudebox-project/.venv/bin/activate" "$shell_rc"; then
-                echo 'if [ -f /home/DOCKERUSER/.claudebox-project/.venv/bin/activate ]; then source /home/DOCKERUSER/.claudebox-project/.venv/bin/activate; fi' >> "$shell_rc"
-            fi
-        done
-    fi
-fi
-
-cd /home/DOCKERUSER
-# Check if we're in shell mode
-if [[ "$1" == "--shell-mode" ]]; then
-    shift  # Remove --shell-mode flag
-    exec su DOCKERUSER -c "source /home/DOCKERUSER/.nvm/nvm.sh && cd /workspace && exec /bin/zsh"
-else
-    # Build command with properly quoted arguments
-    cmd="cd /workspace && /home/DOCKERUSER/claude-wrapper"
-    for arg in "$@"; do
-        # Escape single quotes in the argument
-        escaped_arg=$(echo "$arg" | sed "s/'/'\\\\''/g")
-        cmd="$cmd '$escaped_arg'"
-    done
-    exec su DOCKERUSER -c "$cmd"
-fi
-EOF
-
+# Copy docker entrypoint script
+COPY --chown=$USERNAME docker-entrypoint.sh /usr/local/bin/docker-entrypoint
 RUN sed -i "s/DOCKERUSER/$USERNAME/g" /usr/local/bin/docker-entrypoint && \
     sed -i "s/DOCKERUSER/$USERNAME/g" /home/$USERNAME/init-firewall.sh && \
     chmod +x /usr/local/bin/docker-entrypoint
@@ -1265,7 +1281,7 @@ RUN sed -i "s/DOCKERUSER/$USERNAME/g" /usr/local/bin/docker-entrypoint && \
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint"]
 DOCKERFILE
 
-        run_docker_build "$dockerfile"
+        run_docker_build "$dockerfile" "$build_context"
 
         echo -e "\n${GREEN}Complete!${NC}\n"
         success "Docker image '$IMAGE_NAME' built!"
