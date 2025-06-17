@@ -385,6 +385,8 @@ create_build_files() {
     cat > "$build_context/init-firewall.sh" << 'EOF'
 #!/bin/bash
 set -euo pipefail
+# Ensure USERNAME is set to avoid errors when running with -u
+USERNAME=${USERNAME:-$(id -un 2>/dev/null || echo claude)}
 if [ "${DISABLE_FIREWALL:-false}" = "true" ]; then
     echo "Firewall disabled, skipping setup"
     rm -f "$0"
