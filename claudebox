@@ -978,7 +978,7 @@ RUN bash -c "source $NVM_DIR/nvm.sh && \
     nvm use default && \
     npm install -g @anthropic-ai/claude-code"
 
-RUN cat > ~/init-firewall.sh << EOF
+RUN cat > ~/init-firewall.sh <<'EOF'
 #!/bin/bash
 set -euo pipefail
 if [ "\${DISABLE_FIREWALL:-false}" = "true" ]; then
