@@ -563,6 +563,28 @@ run_docker_build() {
 main() {
     update_symlink
 
+    # Extract and remove global ClaudeBox flags
+    local _box_flags=()
+    local _args=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -v|--verbose)
+                # already processed
+                shift
+                ;;
+            --dangerously-enable-sudo|--dangerously-disable-firewall|--dangerously-skip-permissions)
+                _box_flags+=("$1")
+                shift
+                ;;
+            *)
+                _args+=("$1")
+                shift
+                ;;
+        esac
+    done
+    BOX_FLAGS=("${DEFAULT_FLAGS[@]}" "${_box_flags[@]}")
+    set -- "${_args[@]}"
+
     # Check Docker
     local docker_status
     docker_status=$(check_docker; echo $?)
@@ -701,7 +723,7 @@ main() {
                 "
             else
                 docker exec -it -u "$DOCKER_USER" "$temp_container" \
-                    /home/$DOCKER_USER/claude-wrapper "${DEFAULT_FLAGS[@]}" "$cmd" "$@"
+                    /home/$DOCKER_USER/claude-wrapper "${BOX_FLAGS[@]}" "$cmd" "$@"
             fi
 
             # Commit changes back to image
@@ -1430,7 +1452,7 @@ EOF
        "${extra_mounts[@]}" \
        --cap-add NET_ADMIN \
        --cap-add NET_RAW \
-       "$IMAGE_NAME" "${DEFAULT_FLAGS[@]}" "${RUN_ARGS[@]:-$@}"
+       "$IMAGE_NAME" "${BOX_FLAGS[@]}" "$@"
 }
 
 main "$@"
