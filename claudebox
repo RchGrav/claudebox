@@ -341,10 +341,12 @@ setup_global_mcp_config() {
   }
 }'
 
-    # Ensure global MCP config exists
-    mkdir -p "$(dirname "$mcp_file")"
-    echo "$mcp_content" > "$mcp_file"
-    info "Created global MCP config"
+    mkdir -p "$HOME/.claudebox"
+
+    if [[ ! -f "$mcp_file" ]]; then
+        echo "$mcp_content" > "$mcp_file"
+        echo -e "${GREEN}Created MCP config in ~/.claudebox/.mcp.json${NC}"
+    fi
 }
 
 # Setup Claude agent command
@@ -1403,34 +1405,24 @@ EOF
 
    # Check if we have a TTY
    local tty_flag=""
-   if [ -t 0 ] && [ -t 1 ]; then
-       tty_flag="-it"
-   else
-       tty_flag="-i"
-   fi
-
    # Get project-specific folder
    local project_folder_name
    project_folder_name=$(get_project_folder_name "$PROJECT_DIR")
 
-   docker run $tty_flag --rm \
+   docker run -it --rm --init \
        -w /workspace \
        -v "$PROJECT_DIR":/workspace \
-       -v "$HOME/.claudebox/$project_folder_name":/home/$DOCKER_USER/.claudebox-project \
+       -v "$CLAUDE_DATA_DIR":/home/$DOCKER_USER/.claude \
        -v "$HOME/.claudebox":/home/$DOCKER_USER/.claudebox \
+       -v "$HOME/.config/claude":/home/$DOCKER_USER/.config/claude \
        -v "$HOME/.claude.json":/home/$DOCKER_USER/.claude.json \
-       -v "$HOME/.claude":/home/$DOCKER_USER/.claude \
        -v "$HOME/.npmrc":/home/$DOCKER_USER/.npmrc:ro \
        -v "$HOME/.ssh":/home/$DOCKER_USER/.ssh:ro \
        -e "NODE_ENV=${NODE_ENV:-production}" \
        -e "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}" \
-       -e "NODE_OPTIONS=--max-old-space-size=4096" \
-       -e "POWERLEVEL9K_DISABLE_GITSTATUS=true" \
-       -e "CLAUDEBOX_PROJECT_DIR=$PROJECT_DIR" \
-       "${extra_mounts[@]}" \
        --cap-add NET_ADMIN \
        --cap-add NET_RAW \
-       "$IMAGE_NAME" "${DEFAULT_FLAGS[@]}" "${RUN_ARGS[@]:-$@}"
+       "$IMAGE_NAME" "$@" --mcp-config /home/$DOCKER_USER/.claudebox/.mcp.json
 }
 
 main "$@"
