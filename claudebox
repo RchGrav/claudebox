@@ -720,6 +720,18 @@ main() {
             ;;
     esac
 
+    #Check BuildX
+    if ! docker buildx version &>/dev/null; then
+        info "Installing Docker Buildx plugin (requires sudo)..."
+        sudo mkdir -p /usr/local/lib/docker/cli-plugins
+        VER=$(curl -s https://api.github.com/repos/docker/buildx/releases/latest | grep -Po '"tag_name": "v\K[^"]*')
+        ARCH=$(uname -m); [[ $ARCH == x86_64 ]] && ARCH=amd64; [[ $ARCH == aarch64 ]] && ARCH=arm64
+        sudo curl -sSL "https://github.com/docker/buildx/releases/download/v${VER}/buildx-v${VER}.linux-${ARCH}" \
+          -o /usr/local/lib/docker/cli-plugins/docker-buildx
+        sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-buildx
+        success "Docker Buildx installed successfully."
+    fi
+
     # Check for rebuild and help anywhere in arguments
     local args=("$@")
     local new_args=()
