@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Configuration
 DEFAULT_FLAGS=()
-readonly IMAGE_NAME="claudebox"
+# readonly IMAGE_NAME="claudebox"  # Now computed per project
 readonly DOCKER_USER="claude"
 readonly USER_ID=$(id -u)
 readonly GROUP_ID=$(id -g)
@@ -346,33 +346,6 @@ setup_project_folder() {
     mkdir -p "$PROJECT_CLAUDEBOX_DIR/firewall"
 }
 
-# Global MCP configuration setup
-setup_global_mcp_config() {
-    local mcp_file="$HOME/.claudebox/.mcp.json"
-    local mcp_content='{
-  "mcpServers": {
-    "memory": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-memory"]
-    },
-    "sequential-thinking": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
-    },
-    "context7": {
-      "command": "npx",
-      "args": ["-y", "@upstash/context7-mcp"]
-    }
-  }
-}'
-
-    mkdir -p "$HOME/.claudebox"
-
-    if [[ ! -f "$mcp_file" ]]; then
-        echo "$mcp_content" > "$mcp_file"
-        echo -e "${GREEN}Created MCP config in ~/.claudebox/.mcp.json${NC}"
-    fi
-}
 
 # Setup Claude agent command
 setup_claude_agent_command() {
@@ -544,7 +517,7 @@ DEFAULT_DOMAINS="api.anthropic.com console.anthropic.com statsig.anthropic.com s
 # Read additional domains from allowlist file if it exists
 ALLOWED_DOMAINS="$DEFAULT_DOMAINS"
 # Try project-specific allowlist first, then fall back to global
-if [ -f /home/DOCKERUSER/.claudebox-project/firewall/allowlist ]; then
+if [ -f /home/DOCKERUSER/.claudebox/$CLAUDEBOX_PROJECT_NAME/firewall/allowlist ]; then
     echo "Loading project-specific allowlist"
     while IFS= read -r domain; do
         # Skip comments and empty lines
@@ -553,7 +526,7 @@ if [ -f /home/DOCKERUSER/.claudebox-project/firewall/allowlist ]; then
         # Remove wildcards for now (*.example.com becomes example.com)
         domain="${domain#\*.}"
         ALLOWED_DOMAINS="$ALLOWED_DOMAINS $domain"
-    done < /home/DOCKERUSER/.claudebox-project/firewall/allowlist
+    done < /home/DOCKERUSER/.claudebox/$CLAUDEBOX_PROJECT_NAME/firewall/allowlist
 elif [ -f /home/DOCKERUSER/.claudebox/allowlist ]; then
     while IFS= read -r domain; do
         # Skip comments and empty lines
@@ -635,10 +608,27 @@ set -- "${new_args[@]}"
 export DISABLE_FIREWALL
 
 # Set up project-specific symlinks
-if [ -d /home/DOCKERUSER/.claudebox-project ]; then
+if [ -d /home/DOCKERUSER/.claudebox/$CLAUDEBOX_PROJECT_NAME ]; then
     # Ensure memory directory is accessible
-    mkdir -p /home/DOCKERUSER/.claudebox-project/memory
-    chown -R DOCKERUSER:DOCKERUSER /home/DOCKERUSER/.claudebox-project
+    mkdir -p /home/DOCKERUSER/.claudebox/$CLAUDEBOX_PROJECT_NAME/memory
+    chown -R DOCKERUSER:DOCKERUSER /home/DOCKERUSER/.claudebox/$CLAUDEBOX_PROJECT_NAME
+fi
+
+# Handle project-specific .claude.json
+if [ -d /home/DOCKERUSER/.claudebox/$CLAUDEBOX_PROJECT_NAME ]; then
+    # If this is the first run for this project and no project-specific .claude.json exists
+    if [ ! -f /home/DOCKERUSER/.claudebox/$CLAUDEBOX_PROJECT_NAME/.claude.json ] && [ -f /home/DOCKERUSER/.claude.json.host ]; then
+        # Copy the host's .claude.json as a starting point
+        cp /home/DOCKERUSER/.claude.json.host /home/DOCKERUSER/.claudebox/$CLAUDEBOX_PROJECT_NAME/.claude.json
+        chown DOCKERUSER:DOCKERUSER /home/DOCKERUSER/.claudebox/$CLAUDEBOX_PROJECT_NAME/.claude.json
+    fi
+
+    # If project-specific .claude.json exists, symlink it
+    if [ -f /home/DOCKERUSER/.claudebox/$CLAUDEBOX_PROJECT_NAME/.claude.json ]; then
+        rm -f /home/DOCKERUSER/.claude.json
+        ln -s /home/DOCKERUSER/.claudebox/$CLAUDEBOX_PROJECT_NAME/.claude.json /home/DOCKERUSER/.claude.json
+        chown -h DOCKERUSER:DOCKERUSER /home/DOCKERUSER/.claude.json
+    fi
 fi
 
 if [ -f /home/DOCKERUSER/init-firewall.sh ]; then
@@ -653,18 +643,18 @@ if [ -n "$CLAUDEBOX_PROJECT_NAME" ]; then
     PROFILE_FILE="/home/DOCKERUSER/.claudebox/profiles/${CLAUDEBOX_PROJECT_NAME}.ini"
 
     if command -v uv >/dev/null 2>&1 && [ -f "$PROFILE_FILE" ] && grep -q "python" "$PROFILE_FILE"; then
-        if [ ! -d /home/DOCKERUSER/.claudebox-project/.venv ]; then
-            su - DOCKERUSER -c "uv venv /home/DOCKERUSER/.claudebox-project/.venv"
+        if [ ! -d /home/DOCKERUSER/.claudebox/$CLAUDEBOX_PROJECT_NAME/.venv ]; then
+            su - DOCKERUSER -c "uv venv /home/DOCKERUSER/.claudebox/$CLAUDEBOX_PROJECT_NAME/.venv"
             if [ -f /workspace/pyproject.toml ]; then
                 su - DOCKERUSER -c "cd /workspace && uv sync"
             else
-                su - DOCKERUSER -c "uv pip install --python /home/DOCKERUSER/.claudebox-project/.venv/bin/python ipython black pylint mypy flake8 pytest ruff"
+                su - DOCKERUSER -c "uv pip install --python /home/DOCKERUSER/.claudebox/$CLAUDEBOX_PROJECT_NAME/.venv/bin/python ipython black pylint mypy flake8 pytest ruff"
             fi
         fi
 
         for shell_rc in /home/DOCKERUSER/.zshrc /home/DOCKERUSER/.bashrc; do
-            if ! grep -q "source /home/DOCKERUSER/.claudebox-project/.venv/bin/activate" "$shell_rc"; then
-                echo 'if [ -f /home/DOCKERUSER/.claudebox-project/.venv/bin/activate ]; then source /home/DOCKERUSER/.claudebox-project/.venv/bin/activate; fi' >> "$shell_rc"
+            if ! grep -q "source /home/DOCKERUSER/.claudebox/$CLAUDEBOX_PROJECT_NAME/.venv/bin/activate" "$shell_rc"; then
+                echo 'if [ -f /home/DOCKERUSER/.claudebox/$CLAUDEBOX_PROJECT_NAME/.venv/bin/activate ]; then source /home/DOCKERUSER/.claudebox/$CLAUDEBOX_PROJECT_NAME/.venv/bin/activate; fi' >> "$shell_rc"
             fi
         done
     fi
@@ -690,7 +680,8 @@ EOF
 
 run_docker_build() {
     info "Running docker build..."
-    docker build \
+    # Force BuildKit for better performance and features
+    DOCKER_BUILDKIT=1 docker build \
         --build-arg USER_ID="$USER_ID" \
         --build-arg GROUP_ID="$GROUP_ID" \
         --build-arg USERNAME="$DOCKER_USER" \
@@ -720,24 +711,12 @@ main() {
             ;;
     esac
 
-    #Check BuildX
-    if ! docker buildx version &>/dev/null; then
-        info "Installing Docker Buildx plugin (requires sudo)..."
-        sudo mkdir -p /usr/local/lib/docker/cli-plugins
-        VER=$(curl -s https://api.github.com/repos/docker/buildx/releases/latest | grep -Po '"tag_name": "v\K[^"]*')
-        ARCH=$(uname -m); [[ $ARCH == x86_64 ]] && ARCH=amd64; [[ $ARCH == aarch64 ]] && ARCH=arm64
-        sudo curl -sSL "https://github.com/docker/buildx/releases/download/v${VER}/buildx-v${VER}.linux-${ARCH}" \
-          -o /usr/local/lib/docker/cli-plugins/docker-buildx
-        sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-buildx
-        success "Docker Buildx installed successfully."
-    fi
-
     # Check for rebuild and help anywhere in arguments
     local args=("$@")
     local new_args=()
     local found_rebuild=false
     local found_help=false
-    
+
     for arg in "${args[@]}"; do
         if [[ "$arg" == "rebuild" ]]; then
             found_rebuild=true
@@ -751,16 +730,16 @@ main() {
             new_args+=("$arg")
         fi
     done
-    
+
     if [[ "$found_rebuild" == "true" ]]; then
         warn "Rebuilding ClaudeBox Docker image..."
         if docker image inspect "$IMAGE_NAME" &>/dev/null; then
-            docker ps -a --filter "ancestor=$IMAGE_NAME" -q | xargs -r docker rm -f 2>/dev/null || true
+            docker ps -a --filter "label=claudebox.project" -q | xargs -r docker rm -f 2>/dev/null || true
             docker rmi -f "$IMAGE_NAME" 2>/dev/null || true
         fi
         set -- "${new_args[@]}"
     fi
-    
+
     # Handle help immediately
     if [[ "$found_help" == "true" ]]; then
         if docker image inspect "$IMAGE_NAME" &>/dev/null; then
@@ -791,12 +770,15 @@ main() {
         exit 0
     fi
 
-    
+
     # Compute project folder name early
     local project_folder_name
     project_folder_name=$(get_project_folder_name "$PROJECT_DIR")
     PROJECT_CLAUDEBOX_DIR="$HOME/.claudebox/$project_folder_name"
-    
+
+    # Use project-specific image name
+    IMAGE_NAME="claudebox-${project_folder_name}"
+
     # Handle commands
     [[ "$VERBOSE" == "true" ]] && echo "Command: ${1:-none}" >&2
     case "${1:-}" in
@@ -943,7 +925,7 @@ main() {
                     # Remove all profile files
                     rm -rf "$HOME/.claudebox/profiles"
                     # Remove any containers from this image
-                    docker ps -a --filter "ancestor=$IMAGE_NAME" -q | xargs -r docker rm -f 2>/dev/null || true
+                    docker ps -a --filter "label=claudebox.project" -q | xargs -r docker rm -f 2>/dev/null || true
                     # Remove orphaned containers from images that no longer exist
                     # This is safer as it only removes containers whose images are gone
                     docker ps -a --filter "status=exited" --format "{{.ID}} {{.Image}}" | while read id image; do
@@ -951,6 +933,8 @@ main() {
                             docker rm -f "$id" 2>/dev/null || true
                         fi
                     done
+                   # Remove all claudebox project images
+                   docker images --filter "reference=claudebox-*" -q | xargs -r docker rmi -f 2>/dev/null || true
                     # Remove image
                     docker rmi -f "$IMAGE_NAME" 2>/dev/null || true
                     # Prune build cache
@@ -966,7 +950,7 @@ main() {
                     # Remove all profile files
                     rm -rf "$HOME/.claudebox/profiles"
                     # Remove any containers from this image
-                    docker ps -a --filter "ancestor=$IMAGE_NAME" -q | xargs -r docker rm -f 2>/dev/null || true
+                    docker ps -a --filter "label=claudebox.project" -q | xargs -r docker rm -f 2>/dev/null || true
                     # Remove orphaned containers from images that no longer exist
                     # This is safer as it only removes containers whose images are gone
                     docker ps -a --filter "status=exited" --format "{{.ID}} {{.Image}}" | while read id image; do
@@ -974,6 +958,8 @@ main() {
                             docker rm -f "$id" 2>/dev/null || true
                         fi
                     done
+                   # Remove all claudebox project images
+                   docker images --filter "reference=claudebox-*" -q | xargs -r docker rmi -f 2>/dev/null || true
                     docker rmi -f "$IMAGE_NAME" 2>/dev/null || true
                     success "Containers and image removed! Build cache preserved."
                     ;;
@@ -1005,7 +991,7 @@ main() {
                     ;;
                 --logs|-l)
                     warn "Clearing Docker container logs..."
-                    docker ps -a --filter "ancestor=$IMAGE_NAME" -q | while read -r container; do
+                    docker ps -a --filter "label=claudebox.project" -q | while read -r container; do
                         docker logs "$container" >/dev/null 2>&1 && echo -n | docker logs "$container" 2>/dev/null || true
                     done
                     success "Container logs cleared!"
@@ -1025,10 +1011,15 @@ main() {
                     local project_folder_name
                     project_folder_name=$(get_project_folder_name "$PROJECT_DIR")
                     local project_claudebox_dir="$HOME/.claudebox/$project_folder_name"
+    local image_name="claudebox-${project_folder_name}"
 
                     if [[ -d "$project_claudebox_dir" ]]; then
                         rm -rf "$project_claudebox_dir"
                         success "Removed project data folder: $project_claudebox_dir"
+
+    # Remove project Docker image
+    docker rmi -f "$image_name" 2>/dev/null || true
+    success "Removed project Docker image: $image_name"
                     else
                         info "No project data folder found"
                     fi
@@ -1039,7 +1030,7 @@ main() {
                     # Remove all profile files
                     rm -rf "$HOME/.claudebox/profiles"
                     # Remove any containers from this image
-                    docker ps -a --filter "ancestor=$IMAGE_NAME" -q | xargs -r docker rm -f 2>/dev/null || true
+                    docker ps -a --filter "label=claudebox.project" -q | xargs -r docker rm -f 2>/dev/null || true
                     # Remove orphaned containers from images that no longer exist
                     # This is safer as it only removes containers whose images are gone
                     docker ps -a --filter "status=exited" --format "{{.ID}} {{.Image}}" | while read id image; do
@@ -1047,6 +1038,8 @@ main() {
                             docker rm -f "$id" 2>/dev/null || true
                         fi
                     done
+                   # Remove all claudebox project images
+                   docker images --filter "reference=claudebox-*" -q | xargs -r docker rmi -f 2>/dev/null || true
                     success "Containers removed! Image preserved for quick recreation."
                     ;;
             esac
@@ -1153,6 +1146,24 @@ main() {
                 echo "$running_containers"
             else
                 info "No ClaudeBox containers currently running."
+
+            # Show all ClaudeBox images
+            echo
+            local claudebox_images
+            claudebox_images=$(docker images --filter "reference=claudebox-*" --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}" | tail -n +1)
+            if [[ -n "$claudebox_images" ]]; then
+                cecho "ClaudeBox Docker Images:" "$YELLOW"
+                echo "$claudebox_images"
+            fi
+
+            # Show all ClaudeBox images
+            echo
+            local claudebox_images
+            claudebox_images=$(docker images --filter "reference=claudebox-*" --format "table {{.Repository}}   {{.Tag}}        {{.Size}}" | tail -n +1)
+            if [[ -n "$claudebox_images" ]]; then
+                cecho "ClaudeBox Docker Images:" "$YELLOW"
+                echo "$claudebox_images"
+            fi
             fi
 
             exit 0
@@ -1162,7 +1173,6 @@ main() {
 
     # Setup workspace and global config
     setup_project_folder
-    setup_global_mcp_config
     setup_claude_agent_command
 
     # Profile tracking
@@ -1173,7 +1183,7 @@ main() {
     local current_profiles=()
     local profile_hash=""
 
-    # Collect all profiles from all projects
+    # Read profiles for current project only
     if [[ -d "$HOME/.claudebox/profiles" ]]; then
         for profile_file in "$HOME/.claudebox/profiles"/*.ini; do
             [[ -f "$profile_file" ]] || continue
@@ -1186,13 +1196,15 @@ main() {
                 local found=false
                 for p in "${current_profiles[@]}"; do
                     [[ "$p" == "$profile" ]] && found=true && break
-                done
+                                done
                 [[ "$found" == "false" ]] && current_profiles+=("$profile")
             done
         done
 
         # Create a hash of current profiles
+        # Create a hash of current profiles
         if [[ ${#current_profiles[@]} -gt 0 ]]; then
+            profile_hash=$(printf '%s\n' "${current_profiles[@]}" | sort | sha256sum | cut -d' ' -f1)
             profile_hash=$(printf '%s\n' "${current_profiles[@]}" | sort | sha256sum | cut -d' ' -f1)
         fi
     fi
@@ -1233,6 +1245,7 @@ RUN echo '#!/bin/sh\nexit 101' > /usr/sbin/policy-rc.d && chmod +x /usr/sbin/pol
 # Install locales first to fix locale warnings
 RUN export DEBIAN_FRONTEND=noninteractive && \
     apt-get update -qq && \
+    apt-get install -y -qq --no-install-recommends apt-utils && \
     apt-get install -y -qq locales && \
     echo "en_US.UTF-8 UTF-8" > /etc/locale.gen && \
     locale-gen en_US.UTF-8 && \
@@ -1359,7 +1372,7 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
 DOCKERFILE
                         ;;
                     python)
-    cat >> "$dockerfile" <<'DOCKERFILE'
+                        cat >> "$dockerfile" <<'DOCKERFILE'
 # Python Development Profile (uv-managed Python only)
 RUN export DEBIAN_FRONTEND=noninteractive && \
     apt-get update -qq && \
@@ -1442,6 +1455,7 @@ DOCKERFILE
         # Add label with profile hash
         echo "# Label the image with the profile hash for change detection" >> "$dockerfile"
         echo "LABEL claudebox.profiles=\"$profile_hash\"" >> "$dockerfile"
+        echo "LABEL claudebox.project=\"$project_folder_name\"" >> "$dockerfile"
         echo "" >> "$dockerfile"
         cat >> "$dockerfile" <<'DOCKERFILE'
 
@@ -1585,23 +1599,22 @@ EOF
    local docker_args=()
    [[ "$ENABLE_SUDO" == "true" ]] && docker_args+=("--enable-sudo")
    [[ "$DISABLE_FIREWALL" == "true" ]] && docker_args+=("--disable-firewall")
-   
+
    docker run -it --rm --init \
        -w /workspace \
        -v "$PROJECT_DIR":/workspace \
        -v "$CLAUDE_DATA_DIR":/home/$DOCKER_USER/.claude \
        -v "$HOME/.claudebox":/home/$DOCKER_USER/.claudebox \
        -v "$HOME/.config/claude":/home/$DOCKER_USER/.config/claude \
-       -v "$HOME/.claude.json":/home/$DOCKER_USER/.claude.json \
+       -v "$HOME/.claude.json":/home/$DOCKER_USER/.claude.json.host:ro \
        -v "$HOME/.npmrc":/home/$DOCKER_USER/.npmrc:ro \
        -v "$HOME/.ssh":/home/$DOCKER_USER/.ssh:ro \
-       -v "$PROJECT_CLAUDEBOX_DIR":/home/$DOCKER_USER/.claudebox-project \
        -e "NODE_ENV=${NODE_ENV:-production}" \
        -e "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}" \
        -e "CLAUDEBOX_PROJECT_NAME=$project_folder_name" \
        --cap-add NET_ADMIN \
        --cap-add NET_RAW \
-       "$IMAGE_NAME" "${docker_args[@]}" "$@" --mcp-config /home/$DOCKER_USER/.claudebox/.mcp.json
+       "$IMAGE_NAME" "${docker_args[@]}" "$@"
 }
 
 main "$@"
