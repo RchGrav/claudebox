@@ -731,6 +731,14 @@ main() {
         fi
     done
 
+    # Compute project folder name early
+    local project_folder_name
+    project_folder_name=$(get_project_folder_name "$PROJECT_DIR")
+    PROJECT_CLAUDEBOX_DIR="$HOME/.claudebox/$project_folder_name"
+
+    # Use project-specific image name
+    IMAGE_NAME="claudebox-${project_folder_name}"
+
     if [[ "$found_rebuild" == "true" ]]; then
         warn "Rebuilding ClaudeBox Docker image..."
         if docker image inspect "$IMAGE_NAME" &>/dev/null; then
@@ -770,14 +778,6 @@ main() {
         exit 0
     fi
 
-
-    # Compute project folder name early
-    local project_folder_name
-    project_folder_name=$(get_project_folder_name "$PROJECT_DIR")
-    PROJECT_CLAUDEBOX_DIR="$HOME/.claudebox/$project_folder_name"
-
-    # Use project-specific image name
-    IMAGE_NAME="claudebox-${project_folder_name}"
 
     # Handle commands
     [[ "$VERBOSE" == "true" ]] && echo "Command: ${1:-none}" >&2
