@@ -152,7 +152,7 @@ Save your preferred security flags to avoid typing them every time:
 
 ```bash
 # Save default flags
-claudebox save --dangerously-enable-sudo --dangerously-disable-firewall
+claudebox save --enable-sudo --disable-firewall
 
 # Clear saved flags
 claudebox save
@@ -231,10 +231,10 @@ ClaudeBox includes a built-in agent command for complex workflows:
 
 ```bash
 # Run with sudo enabled (use with caution)
-claudebox --dangerously-enable-sudo
+claudebox --enable-sudo
 
 # Disable network firewall (allows all network access)
-claudebox --dangerously-disable-firewall
+claudebox --disable-firewall
 
 # Skip permission checks
 claudebox --dangerously-skip-permissions
