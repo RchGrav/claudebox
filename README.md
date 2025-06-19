@@ -24,22 +24,29 @@ The Ultimate Claude Code Docker Development Environment - Run Claude AI's coding
 
 ## 🚀 What's New in Latest Update
 
-- **MCP Server Integration**: Built-in Sequential Thinking and Memory servers for enhanced Claude capabilities
-- **Automatic Docker Setup**: Complete Docker installation and configuration for Ubuntu, Debian, Fedora, Arch
-- **Enhanced Security**: Network firewall restricting to Anthropic APIs (can be disabled)
-- **15+ Development Profiles**: From embedded systems to machine learning
-- **Visual Progress Indicators**: See exactly what's happening during installation
-- **Smart `.mcp.json` Management**: Automatic backup and restore of existing configurations
+- **Project-Specific Profiles**: Each project maintains its own language profiles and packages
+- **Save Default Flags**: New `save` command to persist your preferred security flags
+- **Multi-Instance Support**: Run multiple ClaudeBox instances simultaneously in different projects
+- **Enhanced Info Command**: View all project profiles and running containers at a glance
+- **Granular Clean Options**: Fine-grained control over cleanup operations
+- **Agentic Loop Framework**: Built-in agent command for complex multi-step workflows
+- **Per-Project Python Environments**: Automatic virtual environment creation with uv
+- **Developer Tools**: GitHub CLI (gh) and Delta (enhanced git diffs) pre-installed
+- **Project Isolation**: Complete separation of settings between different projects
 
 ## ✨ Features
 
 - **Containerized Environment**: Run Claude Code in an isolated Docker container
 - **MCP Servers**: Pre-configured Model Context Protocol servers for thinking and memory
 - **Development Profiles**: Pre-configured language stacks (C/C++, Python, Rust, Go, etc.)
+- **Project-Specific Configuration**: Each project maintains its own profiles, packages, and settings
 - **Persistent Configuration**: Settings and data persist between sessions
+- **Multi-Instance Support**: Work on multiple projects simultaneously
 - **Package Management**: Easy installation of additional development tools
 - **Auto-Setup**: Handles Docker installation and configuration automatically
-- **Security Features**: Network isolation with optional overrides
+- **Security Features**: Network isolation with project-specific firewall allowlists
+- **Developer Experience**: GitHub CLI, Delta, fzf, and zsh with oh-my-zsh
+- **Python Virtual Environments**: Automatic per-project venv creation with uv
 - **Cross-Platform**: Works on Ubuntu, Debian, Fedora, Arch, and more
 
 ## 📋 Prerequisites
@@ -79,8 +86,32 @@ claudebox --model opus -c
 
 # Get help
 claudebox help          # ClaudeBox specific help
-claudebox --help        # Claude CLI help
+claudebox --help        # Combined Claude CLI + ClaudeBox help
 ```
+
+### Multi-Instance Support
+
+ClaudeBox supports running multiple instances in different projects simultaneously:
+
+```bash
+# Terminal 1 - Project A
+cd ~/projects/website
+claudebox
+
+# Terminal 2 - Project B
+cd ~/projects/api
+claudebox shell
+
+# Terminal 3 - Project C
+cd ~/projects/ml-model
+claudebox profile python ml
+```
+
+Each project maintains its own:
+- Language profiles and installed packages
+- Firewall allowlist
+- Python virtual environment
+- Memory and context (via MCP)
 
 ### Development Profiles
 
@@ -90,7 +121,7 @@ ClaudeBox includes 15+ pre-configured development environments:
 # List all available profiles
 claudebox profile
 
-# Install specific profiles
+# Install specific profiles (project-specific)
 claudebox profile python ml        # Python + Machine Learning
 claudebox profile c openwrt       # C/C++ + OpenWRT
 claudebox profile rust go         # Rust + Go
@@ -115,19 +146,64 @@ claudebox profile rust go         # Rust + Go
 - **security** - Security Tools (nmap, tcpdump, wireshark, penetration testing)
 - **ml** - Machine Learning (PyTorch, TensorFlow, scikit-learn, transformers)
 
+### Default Flags Management
+
+Save your preferred security flags to avoid typing them every time:
+
+```bash
+# Save default flags
+claudebox save --dangerously-enable-sudo --dangerously-disable-firewall
+
+# Clear saved flags
+claudebox save
+
+# Now all claudebox commands will use your saved flags automatically
+claudebox  # Will run with sudo and firewall disabled
+```
+
+### Project Information
+
+View detailed information about your ClaudeBox setup:
+
+```bash
+# Show all project profiles and running containers
+claudebox info
+
+# Example output:
+# ClaudeBox Profile Status
+# 
+# Tracking 3 project profile(s)
+# 
+# /home/user/project1:
+#   Profiles: python ml
+#   Packages: htop vim
+# 
+# /home/user/project2:
+#   Profiles: rust
+# 
+# Current project (/home/user/project1):
+#   Profiles: python ml
+#   Packages: htop vim
+# 
+# Running ClaudeBox containers:
+# CONTAINER ID   STATUS         COMMAND
+# abc123def      Up 5 minutes   claude
+```
+
 ### MCP Servers
 
-ClaudeBox includes two powerful MCP servers:
+ClaudeBox includes three powerful MCP servers:
 
 1. **Sequential Thinking Server** - For complex problem-solving with revision capabilities
 2. **Memory Server** - Knowledge graph for persistent memory across sessions
+3. **Context7 Server** - Enhanced context management
 
 These are automatically configured and available to Claude within the container.
 
 ### Package Management
 
 ```bash
-# Install additional packages
+# Install additional packages (project-specific)
 claudebox install htop vim tmux
 
 # Open a shell in the container
@@ -135,6 +211,20 @@ claudebox shell
 
 # Update Claude CLI
 claudebox update
+```
+
+### Agentic Loop Framework
+
+ClaudeBox includes a built-in agent command for complex workflows:
+
+```bash
+# In Claude, use the agent command
+/agent
+
+# This provides an agentic loop framework with:
+# - Orchestrator (Atlas) - Coordinates everything
+# - Specialist (Mercury) - Multi-disciplinary expert
+# - Evaluator (Apollo) - Quality control
 ```
 
 ### Security Options
@@ -153,10 +243,25 @@ claudebox --dangerously-skip-permissions
 ### Maintenance
 
 ```bash
-# Remove ClaudeBox image
+# View all clean options
+claudebox clean --help
+
+# Remove containers only
 claudebox clean
 
-# Deep clean (remove all build cache)
+# Remove current project's data and profile
+claudebox clean --project
+
+# Remove containers and image
+claudebox clean --image
+
+# Remove Docker build cache
+claudebox clean --cache
+
+# Remove associated volumes
+claudebox clean --volumes
+
+# Complete cleanup
 claudebox clean --all
 
 # Rebuild the image from scratch
@@ -167,8 +272,18 @@ claudebox rebuild
 
 ClaudeBox stores data in:
 - `~/.claude/` - Claude configuration and data
-- `~/.claudebox/` - ClaudeBox-specific data (MCP memory, etc.)
+- `~/.claudebox/` - Global ClaudeBox data
+- `~/.claudebox/profiles/` - Per-project profile configurations
+- `~/.claudebox/<project-name>/` - Project-specific data (memory, context, firewall)
 - Current directory mounted as `/workspace` in container
+
+### Project-Specific Features
+
+Each project automatically gets:
+- **Profile Configuration**: `~/.claudebox/profiles/<project-name>.ini`
+- **Python Virtual Environment**: `.venv` created with uv when Python profile is active
+- **Firewall Allowlist**: Customizable per-project network access rules
+- **Memory & Context**: Isolated MCP server data
 
 ### Environment Variables
 
@@ -177,20 +292,25 @@ ClaudeBox stores data in:
 
 ### MCP Configuration
 
-ClaudeBox automatically manages `.mcp.json` in your workspace:
-- Creates configuration if none exists
-- Backs up existing configurations
-- Restores original on exit
+ClaudeBox automatically manages `.mcp.json` with three servers:
+- Memory server for knowledge graphs
+- Sequential thinking server for complex reasoning
+- Context7 server for enhanced context management
 
 ## 🏗️ Architecture
 
 ClaudeBox creates a Debian-based Docker image with:
 - Node.js (via NVM for version flexibility)
 - Claude Code CLI (@anthropic-ai/claude-code)
-- MCP servers (thinking and memory)
+- MCP servers (thinking, memory, and context7)
 - User account matching host UID/GID
-- Network firewall (Anthropic-only by default)
+- Network firewall (project-specific allowlists)
 - Volume mounts for workspace and configuration
+- GitHub CLI (gh) for repository operations
+- Delta for enhanced git diffs
+- uv for fast Python package management
+- fzf for fuzzy finding
+- zsh with oh-my-zsh
 
 ## 🤝 Contributing
 
@@ -209,23 +329,44 @@ ClaudeBox automatically handles Docker setup, but if you encounter issues:
 3. Run `claudebox` again
 
 ### MCP Servers Not Working
-Test MCP servers after installation:
+Ensure your project has the `.mcp.json` configuration:
 ```bash
-claudebox shell
-~/test-mcp.sh
+cat .mcp.json  # Should show memory, sequential-thinking, and context7 servers
 ```
 
 ### Profile Installation Failed
 ```bash
-claudebox clean --all
+# Clean and rebuild for current project
+claudebox clean --project
 claudebox rebuild
 claudebox profile <name>
+```
+
+### Python Virtual Environment Issues
+ClaudeBox automatically creates a venv when Python profile is active:
+```bash
+# The venv is created at ~/.claudebox/<project>/venv
+# It's automatically activated in the container
+claudebox shell
+which python  # Should show the venv python
 ```
 
 ### Can't Find Command
 Ensure the symlink was created:
 ```bash
-sudo ln -s /path/to/claudebox /usr/local/bin/claudebox
+ls -la ~/.local/bin/claudebox
+# Or manually create it
+ln -s /path/to/claudebox ~/.local/bin/claudebox
+```
+
+### Multiple Instance Conflicts
+Each project is isolated, but if you see issues:
+```bash
+# Check running containers
+claudebox info
+
+# Clean project-specific data
+claudebox clean --project
 ```
 
 ## 🎉 Acknowledgments
