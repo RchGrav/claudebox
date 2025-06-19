@@ -25,11 +25,6 @@ readonly CLAUDE_DATA_DIR="$HOME/.claude"
 readonly LINK_TARGET="$HOME/.local/bin/claudebox"
 readonly NODE_VERSION="--lts"
 
-# Default flags - comment/uncomment as needed
-#DEFAULT_FLAGS+=("--dangerously-skip-permissions")
-#DEFAULT_FLAGS+=("--dangerously-enable-sudo")
-#DEFAULT_FLAGS+=("--dangerously-disable-firewall")
-
 # Color codes
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
@@ -49,11 +44,47 @@ success() { cecho "$1" "$GREEN"; }
 
 # Parse early flags
 VERBOSE=false
+ENABLE_SUDO=false
+DISABLE_FIREWALL=false
+DOCKER_ARGS=()
+
 for arg in "$@"; do
     case "$arg" in
         -v|--verbose) VERBOSE=true ;;
+        --enable-sudo) ENABLE_SUDO=true ;;
+        --disable-firewall) DISABLE_FIREWALL=true ;;
+        save)
+            shift
+            defaults_file="$HOME/.claudebox/default-flags"
+
+            if [[ $# -eq 0 ]]; then
+                if [[ -f "$defaults_file" ]]; then
+                    rm -f "$defaults_file"
+                    success "Cleared saved default flags"
+                else
+                    info "No saved default flags to clear"
+                fi
+            else
+                mkdir -p "$HOME/.claudebox"
+                printf '%s\n' "$@" > "$defaults_file"
+                success "Saved default flags: $*"
+                info "These will be applied automatically to all claudebox commands"
+            fi
+            exit 0
+            ;;
+
     esac
 done
+
+# Load saved default flags if they exist
+if [[ -f "$HOME/.claudebox/default-flags" ]]; then
+    while IFS= read -r flag; do
+        [[ -n "$flag" ]] && DEFAULT_FLAGS+=("$flag")
+    done < "$HOME/.claudebox/default-flags"
+fi
+
+# Add default flags to arguments
+set -- "${DEFAULT_FLAGS[@]}" "$@"
 
 # Logo
 logo() {
@@ -309,10 +340,6 @@ update_profile_section() {
 
 # Project-specific folder setup
 setup_project_folder() {
-    local project_folder_name
-    project_folder_name=$(get_project_folder_name "$PROJECT_DIR")
-    PROJECT_CLAUDEBOX_DIR="$HOME/.claudebox/$project_folder_name"
-
     mkdir -p "$PROJECT_CLAUDEBOX_DIR/claude-config"
     mkdir -p "$PROJECT_CLAUDEBOX_DIR/memory"
     mkdir -p "$PROJECT_CLAUDEBOX_DIR/context"
@@ -596,13 +623,15 @@ EOF
 set -euo pipefail
 ENABLE_SUDO=false
 DISABLE_FIREWALL=false
+new_args=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --dangerously-enable-sudo) ENABLE_SUDO=true; shift ;;
-        --dangerously-disable-firewall) DISABLE_FIREWALL=true; shift ;;
-        *) break ;;
+        --enable-sudo) ENABLE_SUDO=true; shift ;;
+        --disable-firewall) DISABLE_FIREWALL=true; shift ;;
+        *) new_args+=("$1"); shift ;;
     esac
 done
+set -- "${new_args[@]}"
 export DISABLE_FIREWALL
 
 # Set up project-specific symlinks
@@ -620,8 +649,8 @@ if [ "$ENABLE_SUDO" = "true" ]; then
     chmod 0440 /etc/sudoers.d/DOCKERUSER
 fi
 
-if [ -n "$CLAUDEBOX_PROJECT_DIR" ]; then
-    PROFILE_FILE="/home/DOCKERUSER/.claudebox/profiles/$(echo "$CLAUDEBOX_PROJECT_DIR" | sed 's|/|-|g' | sed 's|^-||').ini"
+if [ -n "$CLAUDEBOX_PROJECT_NAME" ]; then
+    PROFILE_FILE="/home/DOCKERUSER/.claudebox/profiles/${CLAUDEBOX_PROJECT_NAME}.ini"
 
     if command -v uv >/dev/null 2>&1 && [ -f "$PROFILE_FILE" ] && grep -q "python" "$PROFILE_FILE"; then
         if [ ! -d /home/DOCKERUSER/.claudebox-project/.venv ]; then
@@ -691,6 +720,71 @@ main() {
             ;;
     esac
 
+    # Check for rebuild and help anywhere in arguments
+    local args=("$@")
+    local new_args=()
+    local found_rebuild=false
+    local found_help=false
+    
+    for arg in "${args[@]}"; do
+        if [[ "$arg" == "rebuild" ]]; then
+            found_rebuild=true
+        elif [[ "$arg" == "help" || "$arg" == "--help" || "$arg" == "-h" ]]; then
+            found_help=true
+            new_args+=("$arg")
+        elif [[ "$arg" == "--enable-sudo" || "$arg" == "--disable-firewall" ]]; then
+            # These are handled separately, don't add to new_args
+            continue
+        else
+            new_args+=("$arg")
+        fi
+    done
+    
+    if [[ "$found_rebuild" == "true" ]]; then
+        warn "Rebuilding ClaudeBox Docker image..."
+        if docker image inspect "$IMAGE_NAME" &>/dev/null; then
+            docker ps -a --filter "ancestor=$IMAGE_NAME" -q | xargs -r docker rm -f 2>/dev/null || true
+            docker rmi -f "$IMAGE_NAME" 2>/dev/null || true
+        fi
+        set -- "${new_args[@]}"
+    fi
+    
+    # Handle help immediately
+    if [[ "$found_help" == "true" ]]; then
+        if docker image inspect "$IMAGE_NAME" &>/dev/null; then
+            docker run --rm \
+                -u "$DOCKER_USER" \
+                --entrypoint /home/$DOCKER_USER/claude-wrapper \
+                "$IMAGE_NAME" --help | sed '1s/claude/claudebox/g'
+            echo
+            cecho "Added Options:" "$WHITE"
+            echo -e "${CYAN}  -v, --verbose                   ${WHITE}Show detailed output"
+            echo -e "${CYAN}  --enable-sudo                   ${WHITE}Enable sudo without password"
+            echo -e "${CYAN}  --disable-firewall              ${WHITE}Disable network restrictions"
+            echo
+            cecho "Added Commands:" "$WHITE"
+            echo -e "  profile [names...]              Install language profiles"
+            echo -e "  install <packages>              Install apt packages"
+            echo -e "  save [flags...]                 Save default flags (no args = clear saved flags)"
+            echo -e "  shell                           Open bash shell in container"
+            echo -e "  info                            Show ClaudeBox container status"
+            echo -e "  clean                           Clean up ClaudeBox resources (use 'clean --help' for options)"
+            echo -e "  rebuild                         Rebuild the Docker image from scratch${NC}"
+        else
+            cecho "ClaudeBox - Claude Code Docker Environment" "$CYAN"
+            echo
+            warn "First run setup required!"
+            echo "Run script without arguments first to build the Docker image."
+        fi
+        exit 0
+    fi
+
+    
+    # Compute project folder name early
+    local project_folder_name
+    project_folder_name=$(get_project_folder_name "$PROJECT_DIR")
+    PROJECT_CLAUDEBOX_DIR="$HOME/.claudebox/$project_folder_name"
+    
     # Handle commands
     [[ "$VERBOSE" == "true" ]] && echo "Command: ${1:-none}" >&2
     case "${1:-}" in
@@ -766,26 +860,6 @@ main() {
             echo
             ;;
 
-        save|commit)
-            shift
-            warn "The 'save' command is deprecated!"
-            info "With --rm containers, there's nothing to save."
-            info "Profiles and packages are tracked in profiles.json automatically."
-            echo
-
-            # Show current project's profile info
-            local profile_file
-            profile_file=$(get_profile_file_path)
-
-            if [[ -f "$profile_file" ]]; then
-                cecho "Current project profile info ($PROJECT_DIR):" "$CYAN"
-                cat "$profile_file"
-            else
-                info "No profiles configured for current project."
-            fi
-
-            exit 0
-            ;;
 
         update|config|mcp|migrate-installer)
             [[ ! -f /.dockerenv ]] && docker image inspect "$IMAGE_NAME" &>/dev/null || \
@@ -978,13 +1052,13 @@ main() {
                 echo
                 cecho "Added Options:" "$WHITE"
                 echo -e "${CYAN}  -v, --verbose                   ${WHITE}Show detailed output"
-                echo -e "${CYAN}  --dangerously-enable-sudo       ${WHITE}Enable sudo without password"
-                echo -e "${CYAN}  --dangerously-disable-firewall  ${WHITE}Disable network restrictions"
+                echo -e "${CYAN}  --enable-sudo                   ${WHITE}Enable sudo without password"
+                echo -e "${CYAN}  --disable-firewall              ${WHITE}Disable network restrictions"
                 echo
                 cecho "Added Commands:" "$WHITE"
                 echo -e "  profile [names...]              Install language profiles"
                 echo -e "  install <packages>              Install apt packages"
-                echo -e "  save                            (Deprecated) Container state is auto-tracked"
+                echo -e "  save [flags...]                 Save default flags (no args = clear saved flags)"
                 echo -e "  shell                           Open bash shell in container"
                 echo -e "  info                            Show ClaudeBox container status"
                 echo -e "  clean                           Clean up ClaudeBox resources (use 'clean --help' for options)"
@@ -1072,19 +1146,6 @@ main() {
             exit 0
             ;;
 
-        rebuild)
-            shift  # Remove 'rebuild' from arguments
-            warn "Rebuilding ClaudeBox Docker image..."
-
-            # Check if image exists and remove it
-            if docker image inspect "$IMAGE_NAME" &>/dev/null; then
-                # Stop any running containers from this image first
-                docker ps -a --filter "ancestor=$IMAGE_NAME" -q | xargs -r docker rm -f 2>/dev/null || true
-                docker rmi -f "$IMAGE_NAME" 2>/dev/null || true
-            fi
-
-            # Continue to main execution which will detect missing image and rebuild
-            ;;
     esac
 
     # Setup workspace and global config
@@ -1435,9 +1496,7 @@ DOCKERFILE
    fi
 
    # Create project-specific allowlist if it doesn't exist
-   local project_folder_name
-   project_folder_name=$(get_project_folder_name "$PROJECT_DIR")
-   local allowlist_file="$HOME/.claudebox/$project_folder_name/firewall/allowlist"
+   local allowlist_file="$PROJECT_CLAUDEBOX_DIR/firewall/allowlist"
 
    if [[ ! -f "$allowlist_file" ]]; then
        mkdir -p "$(dirname "$allowlist_file")"
@@ -1510,12 +1569,11 @@ EOF
 
    # Create new container with --rm
 
-   # Check if we have a TTY
-   local tty_flag=""
-   # Get project-specific folder
-   local project_folder_name
-   project_folder_name=$(get_project_folder_name "$PROJECT_DIR")
-
+   # Build Docker arguments
+   local docker_args=()
+   [[ "$ENABLE_SUDO" == "true" ]] && docker_args+=("--enable-sudo")
+   [[ "$DISABLE_FIREWALL" == "true" ]] && docker_args+=("--disable-firewall")
+   
    docker run -it --rm --init \
        -w /workspace \
        -v "$PROJECT_DIR":/workspace \
@@ -1525,11 +1583,13 @@ EOF
        -v "$HOME/.claude.json":/home/$DOCKER_USER/.claude.json \
        -v "$HOME/.npmrc":/home/$DOCKER_USER/.npmrc:ro \
        -v "$HOME/.ssh":/home/$DOCKER_USER/.ssh:ro \
+       -v "$PROJECT_CLAUDEBOX_DIR":/home/$DOCKER_USER/.claudebox-project \
        -e "NODE_ENV=${NODE_ENV:-production}" \
        -e "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}" \
+       -e "CLAUDEBOX_PROJECT_NAME=$project_folder_name" \
        --cap-add NET_ADMIN \
        --cap-add NET_RAW \
-       "$IMAGE_NAME" "$@" --mcp-config /home/$DOCKER_USER/.claudebox/.mcp.json
+       "$IMAGE_NAME" "${docker_args[@]}" "$@" --mcp-config /home/$DOCKER_USER/.claudebox/.mcp.json
 }
 
 main "$@"
