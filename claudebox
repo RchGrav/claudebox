@@ -1261,7 +1261,7 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
     apt-get install -y -qq curl gnupg ca-certificates sudo git iptables ipset && \
     apt-get clean
 
-RUN groupadd -g $GROUP_ID $USERNAME || true && \
+RUN groupadd -o -g $GROUP_ID $USERNAME && \
     useradd -m -u $USER_ID -g $GROUP_ID -s /bin/bash $USERNAME
 
 # Persist bash history
