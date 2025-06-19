@@ -662,7 +662,7 @@ fi
 
 cd /home/DOCKERUSER
 # Check if we're in shell mode
-if [[ "$1" == "--shell-mode" ]]; then
+if [[ "${1:-}" == "--shell-mode" ]]; then
     shift  # Remove --shell-mode flag
     exec su DOCKERUSER -c "source /home/DOCKERUSER/.nvm/nvm.sh && cd /workspace && exec /bin/zsh"
 else
