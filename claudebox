@@ -1018,15 +1018,15 @@ main() {
                     # Remove project-specific folder
                     local project_folder_name
                     local project_claudebox_dir="$HOME/.claudebox/$project_folder_name"
-    local image_name="claudebox-${project_folder_name}"
+                    local image_name="claudebox-${project_folder_name,,}"
 
                     if [[ -d "$project_claudebox_dir" ]]; then
                         rm -rf "$project_claudebox_dir"
                         success "Removed project data folder: $project_claudebox_dir"
     
-    # Remove project Docker image
-    docker rmi -f "$image_name" 2>/dev/null || true
-    success "Removed project Docker image: $image_name"
+                        # Remove project Docker image
+                        docker rmi -f "$image_name" 2>/dev/null || true
+                        success "Removed project Docker image: $image_name"
                     else
                         info "No project data folder found"
                     fi
@@ -1476,6 +1476,7 @@ RUN sed -i "s/DOCKERUSER/$USERNAME/g" /usr/local/bin/docker-entrypoint && \
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint"]
 DOCKERFILE
 
+        IMAGE_NAME="${IMAGE_NAME,,}"
         run_docker_build "$dockerfile" "$build_context"
 
         echo -e "\n${GREEN}Complete!${NC}\n"
