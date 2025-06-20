@@ -22,10 +22,6 @@ get_script_path() {
 readonly SCRIPT_PATH="$(get_script_path)"
 
 readonly CLAUDE_DATA_DIR="$HOME/.claude"
-
-# Global variables that will be set in main()
-PROJECT_CLAUDEBOX_DIR=""
-IMAGE_NAME=""
 readonly LINK_TARGET="$HOME/.local/bin/claudebox"
 readonly NODE_VERSION="--lts"
 
@@ -226,9 +222,9 @@ show_spinner() {
 
 # Profile definitions
 declare -A PROFILES PROFILE_DESCRIPTIONS
-PROFILES[c]="build-essential gcc g++ gdb valgrind cmake ninja-build clang clang-format clang-tidy cppcheck doxygen libboost-all-dev autoconf automake libtool pkg-config libcmocka-dev libcmocka0 lcov libncurses5-dev libncursesw5-dev"
+PROFILES[c]="build-essential gcc g++ gdb valgrind cmake ninja-build clang clang-format clang-tidy cppcheck doxygen libboost-all-dev autoconf automake libtool pkg-config libcmocka-dev libcmocka0 lco                                                                                                                                                                                                                                                                                                        v libncurses5-dev libncursesw5-dev"
 PROFILE_DESCRIPTIONS[c]="C/C++ Development (compilers, debuggers, analyzers, build tools, cmocka, coverage, ncurses)"
-PROFILES[openwrt]="build-essential gcc g++ make git wget unzip sudo file python3 python3-distutils rsync libncurses5-dev zlib1g-dev gawk gettext libssl-dev xsltproc libelf-dev libtool automake autoconf ccache subversion swig time qemu-system-arm qemu-system-aarch64 qemu-system-mips qemu-system-x86 qemu-utils"
+PROFILES[openwrt]="build-essential gcc g++ make git wget unzip sudo file python3 python3-distutils rsync libncurses5-dev zlib1g-dev gawk gettext libssl-dev xsltproc libelf-dev libtool automake auto                                                                                                                                                                                                                                                                                                        conf ccache subversion swig time qemu-system-arm qemu-system-aarch64 qemu-system-mips qemu-system-x86 qemu-utils"
 PROFILE_DESCRIPTIONS[openwrt]="OpenWRT Development (cross-compilation, QEMU, build essentials)"
 PROFILES[rust]="curl build-essential pkg-config libssl-dev"
 PROFILE_DESCRIPTIONS[rust]="Rust Development (cargo and rustc will be installed separately)"
@@ -240,7 +236,7 @@ PROFILES[javascript]="build-essential python3"
 PROFILE_DESCRIPTIONS[javascript]="JavaScript/TypeScript Development (Node.js, npm, yarn)"
 PROFILES[java]="openjdk-17-jdk maven gradle ant"
 PROFILE_DESCRIPTIONS[java]="Java Development (OpenJDK 17, Maven, Gradle, Ant)"
-PROFILES[ruby]="ruby-full ruby-dev build-essential zlib1g-dev libssl-dev libreadline-dev libyaml-dev libsqlite3-dev sqlite3 libxml2-dev libxslt1-dev libcurl4-openssl-dev software-properties-common libffi-dev"
+PROFILES[ruby]="ruby-full ruby-dev build-essential zlib1g-dev libssl-dev libreadline-dev libyaml-dev libsqlite3-dev sqlite3 libxml2-dev libxslt1-dev libcurl4-openssl-dev software-properties-common                                                                                                                                                                                                                                                                                                         libffi-dev"
 PROFILE_DESCRIPTIONS[ruby]="Ruby Development (Ruby, gems, build tools)"
 PROFILES[php]="php php-cli php-fpm php-mysql php-pgsql php-sqlite3 php-curl php-gd php-mbstring php-xml php-zip composer"
 PROFILE_DESCRIPTIONS[php]="PHP Development (PHP, Composer, common extensions)"
@@ -344,11 +340,6 @@ update_profile_section() {
 
 # Project-specific folder setup
 setup_project_folder() {
-    # Ensure PROJECT_CLAUDEBOX_DIR is set
-    if [[ -z "$PROJECT_CLAUDEBOX_DIR" ]]; then
-        echo "Error: PROJECT_CLAUDEBOX_DIR not set" >&2
-        return 1
-    fi
     mkdir -p "$PROJECT_CLAUDEBOX_DIR/claude-config"
     mkdir -p "$PROJECT_CLAUDEBOX_DIR/memory"
     mkdir -p "$PROJECT_CLAUDEBOX_DIR/context"
@@ -631,7 +622,7 @@ if [ -d /home/DOCKERUSER/.claudebox/$CLAUDEBOX_PROJECT_NAME ]; then
         cp /home/DOCKERUSER/.claude.json.host /home/DOCKERUSER/.claudebox/$CLAUDEBOX_PROJECT_NAME/.claude.json
         chown DOCKERUSER:DOCKERUSER /home/DOCKERUSER/.claudebox/$CLAUDEBOX_PROJECT_NAME/.claude.json
     fi
-    
+
     # If project-specific .claude.json exists, symlink it
     if [ -f /home/DOCKERUSER/.claudebox/$CLAUDEBOX_PROJECT_NAME/.claude.json ]; then
         rm -f /home/DOCKERUSER/.claude.json
@@ -663,7 +654,7 @@ if [ -n "$CLAUDEBOX_PROJECT_NAME" ]; then
 
         for shell_rc in /home/DOCKERUSER/.zshrc /home/DOCKERUSER/.bashrc; do
             if ! grep -q "source /home/DOCKERUSER/.claudebox/$CLAUDEBOX_PROJECT_NAME/.venv/bin/activate" "$shell_rc"; then
-                echo 'if [ -f /home/DOCKERUSER/.claudebox/$CLAUDEBOX_PROJECT_NAME/.venv/bin/activate ]; then source /home/DOCKERUSER/.claudebox/$CLAUDEBOX_PROJECT_NAME/.venv/bin/activate; fi' >> "$shell_rc"
+                echo 'if [ -f /home/DOCKERUSER/.claudebox/$CLAUDEBOX_PROJECT_NAME/.venv/bin/activate ]; then source /home/DOCKERUSER/.claudebox/$CLAUDEBOX_PROJECT_NAME/.venv/bin/activate; fi' >> "$                                                                                                                                                                                                                                                                                                        shell_rc"
             fi
         done
     fi
@@ -702,12 +693,6 @@ run_docker_build() {
 main() {
     update_symlink
 
-    # Compute project folder name and set globals early
-    local project_folder_name
-    project_folder_name=$(get_project_folder_name "$PROJECT_DIR")
-    PROJECT_CLAUDEBOX_DIR="$HOME/.claudebox/$project_folder_name"
-    IMAGE_NAME="claudebox-${project_folder_name}"
-
     # Check Docker
     local docker_status
     docker_status=$(check_docker; echo $?)
@@ -731,7 +716,7 @@ main() {
     local new_args=()
     local found_rebuild=false
     local found_help=false
-    
+
     for arg in "${args[@]}"; do
         if [[ "$arg" == "rebuild" ]]; then
             found_rebuild=true
@@ -745,16 +730,18 @@ main() {
             new_args+=("$arg")
         fi
     done
-    
+
     if [[ "$found_rebuild" == "true" ]]; then
         # Compute IMAGE_NAME for rebuild
+        local project_folder_name
+        warn "Rebuilding ClaudeBox Docker image..."
         if docker image inspect "$IMAGE_NAME" &>/dev/null; then
             docker ps -a --filter "label=claudebox.project" -q | xargs -r docker rm -f 2>/dev/null || true
             docker rmi -f "$IMAGE_NAME" 2>/dev/null || true
         fi
         set -- "${new_args[@]}"
     fi
-    
+
     # Handle help immediately
     if [[ "$found_help" == "true" ]]; then
         if docker image inspect "$IMAGE_NAME" &>/dev/null; then
@@ -785,13 +772,15 @@ main() {
         exit 0
     fi
 
-    
+
     # Compute project folder name early
-    #     local project_folder_name
-    #     PROJECT_CLAUDEBOX_DIR="$HOME/.claudebox/$project_folder_name"
-    
-    #     # Use project-specific image name
-    
+    local project_folder_name
+    project_folder_name=$(get_project_folder_name "$PROJECT_DIR")
+    IMAGE_NAME="claudebox-${project_folder_name}"
+    PROJECT_CLAUDEBOX_DIR="$HOME/.claudebox/$project_folder_name"
+
+    # Use project-specific image name
+
     # Handle commands
     [[ "$VERBOSE" == "true" ]] && echo "Command: ${1:-none}" >&2
     case "${1:-}" in
@@ -1021,12 +1010,14 @@ main() {
                     fi
 
                     # Remove project-specific folder
+                    local project_folder_name
+                    local project_claudebox_dir="$HOME/.claudebox/$project_folder_name"
     local image_name="claudebox-${project_folder_name}"
 
                     if [[ -d "$project_claudebox_dir" ]]; then
                         rm -rf "$project_claudebox_dir"
                         success "Removed project data folder: $project_claudebox_dir"
-    
+
     # Remove project Docker image
     docker rmi -f "$image_name" 2>/dev/null || true
     success "Removed project Docker image: $image_name"
@@ -1156,6 +1147,7 @@ main() {
                 echo "$running_containers"
             else
                 info "No ClaudeBox containers currently running."
+            fi
 
             # Show all ClaudeBox images
             echo
@@ -1166,15 +1158,6 @@ main() {
                 echo "$claudebox_images"
             fi
 
-            # Show all ClaudeBox images
-            echo
-            local claudebox_images
-            claudebox_images=$(docker images --filter "reference=claudebox-*" --format "table {{.Repository}}	{{.Tag}}	{{.Size}}" | tail -n +1)
-            if [[ -n "$claudebox_images" ]]; then
-                cecho "ClaudeBox Docker Images:" "$YELLOW"
-                echo "$claudebox_images"
-            fi
-            fi
 
             exit 0
             ;;
@@ -1214,7 +1197,6 @@ main() {
         # Create a hash of current profiles
         # Create a hash of current profiles
         if [[ ${#current_profiles[@]} -gt 0 ]]; then
-            profile_hash=$(printf '%s\n' "${current_profiles[@]}" | sort | sha256sum | cut -d' ' -f1)
             profile_hash=$(printf '%s\n' "${current_profiles[@]}" | sort | sha256sum | cut -d' ' -f1)
         fi
     fi
@@ -1291,7 +1273,7 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
 
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && \
     chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg && \
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.l                                                                                                                                                                                                                                                                                                        ist > /dev/null && \
     apt update -qq && \
     apt install gh -y -qq && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
@@ -1376,7 +1358,7 @@ DOCKERFILE
 # C/C++ Development Profile
 RUN export DEBIAN_FRONTEND=noninteractive && \
     apt-get update -qq && \
-    apt-get install -y -qq build-essential gcc g++ gdb valgrind cmake ninja-build clang clang-format clang-tidy cppcheck doxygen libboost-all-dev autoconf automake libtool pkg-config libcmocka-dev libcmocka0 lcov libncurses5-dev libncursesw5-dev && \
+    apt-get install -y -qq build-essential gcc g++ gdb valgrind cmake ninja-build clang clang-format clang-tidy cppcheck doxygen libboost-all-dev autoconf automake libtool pkg-config libcmocka-dev                                                                                                                                                                                                                                                                                                         libcmocka0 lcov libncurses5-dev libncursesw5-dev && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 DOCKERFILE
@@ -1447,7 +1429,7 @@ DOCKERFILE
 # OpenWRT Development Profile
 RUN export DEBIAN_FRONTEND=noninteractive && \
     apt-get update -qq && \
-    apt-get install -y -qq build-essential gcc g++ make git wget unzip sudo file python3 python3-distutils rsync libncurses5-dev zlib1g-dev gawk gettext libssl-dev xsltproc libelf-dev libtool automake autoconf ccache subversion swig time qemu-system-arm qemu-system-aarch64 qemu-system-mips qemu-system-x86 qemu-utils && \
+    apt-get install -y -qq build-essential gcc g++ make git wget unzip sudo file python3 python3-distutils rsync libncurses5-dev zlib1g-dev gawk gettext libssl-dev xsltproc libelf-dev libtool autom                                                                                                                                                                                                                                                                                                        ake autoconf ccache subversion swig time qemu-system-arm qemu-system-aarch64 qemu-system-mips qemu-system-x86 qemu-utils && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 DOCKERFILE
@@ -1609,7 +1591,7 @@ EOF
    local docker_args=()
    [[ "$ENABLE_SUDO" == "true" ]] && docker_args+=("--enable-sudo")
    [[ "$DISABLE_FIREWALL" == "true" ]] && docker_args+=("--disable-firewall")
-   
+
    docker run -it --rm --init \
        -w /workspace \
        -v "$PROJECT_DIR":/workspace \
