@@ -22,6 +22,10 @@ get_script_path() {
 readonly SCRIPT_PATH="$(get_script_path)"
 
 readonly CLAUDE_DATA_DIR="$HOME/.claude"
+
+# Global variables that will be set in main()
+PROJECT_CLAUDEBOX_DIR=""
+IMAGE_NAME=""
 readonly LINK_TARGET="$HOME/.local/bin/claudebox"
 readonly NODE_VERSION="--lts"
 
@@ -340,6 +344,11 @@ update_profile_section() {
 
 # Project-specific folder setup
 setup_project_folder() {
+    # Ensure PROJECT_CLAUDEBOX_DIR is set
+    if [[ -z "$PROJECT_CLAUDEBOX_DIR" ]]; then
+        echo "Error: PROJECT_CLAUDEBOX_DIR not set" >&2
+        return 1
+    fi
     mkdir -p "$PROJECT_CLAUDEBOX_DIR/claude-config"
     mkdir -p "$PROJECT_CLAUDEBOX_DIR/memory"
     mkdir -p "$PROJECT_CLAUDEBOX_DIR/context"
@@ -693,6 +702,12 @@ run_docker_build() {
 main() {
     update_symlink
 
+    # Compute project folder name and set globals early
+    local project_folder_name
+    project_folder_name=$(get_project_folder_name "$PROJECT_DIR")
+    PROJECT_CLAUDEBOX_DIR="$HOME/.claudebox/$project_folder_name"
+    IMAGE_NAME="claudebox-${project_folder_name}"
+
     # Check Docker
     local docker_status
     docker_status=$(check_docker; echo $?)
@@ -733,8 +748,6 @@ main() {
     
     if [[ "$found_rebuild" == "true" ]]; then
         # Compute IMAGE_NAME for rebuild
-        local project_folder_name
-        warn "Rebuilding ClaudeBox Docker image..."
         if docker image inspect "$IMAGE_NAME" &>/dev/null; then
             docker ps -a --filter "label=claudebox.project" -q | xargs -r docker rm -f 2>/dev/null || true
             docker rmi -f "$IMAGE_NAME" 2>/dev/null || true
@@ -774,10 +787,10 @@ main() {
 
     
     # Compute project folder name early
-    local project_folder_name
-    PROJECT_CLAUDEBOX_DIR="$HOME/.claudebox/$project_folder_name"
+    #     local project_folder_name
+    #     PROJECT_CLAUDEBOX_DIR="$HOME/.claudebox/$project_folder_name"
     
-    # Use project-specific image name
+    #     # Use project-specific image name
     
     # Handle commands
     [[ "$VERBOSE" == "true" ]] && echo "Command: ${1:-none}" >&2
@@ -1008,8 +1021,6 @@ main() {
                     fi
 
                     # Remove project-specific folder
-                    local project_folder_name
-                    local project_claudebox_dir="$HOME/.claudebox/$project_folder_name"
     local image_name="claudebox-${project_folder_name}"
 
                     if [[ -d "$project_claudebox_dir" ]]; then
