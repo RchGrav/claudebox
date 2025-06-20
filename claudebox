@@ -706,7 +706,7 @@ main() {
     local project_folder_name
     project_folder_name=$(get_project_folder_name "$PROJECT_DIR")
     PROJECT_CLAUDEBOX_DIR="$HOME/.claudebox/$project_folder_name"
-    IMAGE_NAME="claudebox-${project_folder_name}"
+    IMAGE_NAME="claudebox:${project_folder_name}"
 
     # Check Docker
     local docker_status
