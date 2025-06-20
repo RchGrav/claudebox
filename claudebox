@@ -266,7 +266,7 @@ docker_exec_user() {
 
 # Helper functions for project profiles
 get_project_folder_name() {
-    echo "$1" | sed 's|^/||; s|/|-|g'
+    echo "$1" | sed 's|^/||; s|[^a-zA-Z0-9]|_|g; s|_+|_|g; s|^_||; s|_$||'
 }
 
 get_profile_file_path() {
@@ -622,7 +622,7 @@ if [ -d /home/DOCKERUSER/.claudebox/$CLAUDEBOX_PROJECT_NAME ]; then
         cp /home/DOCKERUSER/.claude.json.host /home/DOCKERUSER/.claudebox/$CLAUDEBOX_PROJECT_NAME/.claude.json
         chown DOCKERUSER:DOCKERUSER /home/DOCKERUSER/.claudebox/$CLAUDEBOX_PROJECT_NAME/.claude.json
     fi
-
+    
     # If project-specific .claude.json exists, symlink it
     if [ -f /home/DOCKERUSER/.claudebox/$CLAUDEBOX_PROJECT_NAME/.claude.json ]; then
         rm -f /home/DOCKERUSER/.claude.json
@@ -662,7 +662,7 @@ fi
 
 cd /home/DOCKERUSER
 # Check if we're in shell mode
-if [[ "$1" == "--shell-mode" ]]; then
+if [[ "${1:-}" == "--shell-mode" ]]; then
     shift  # Remove --shell-mode flag
     exec su DOCKERUSER -c "source /home/DOCKERUSER/.nvm/nvm.sh && cd /workspace && exec /bin/zsh"
 else
@@ -716,7 +716,7 @@ main() {
     local new_args=()
     local found_rebuild=false
     local found_help=false
-
+    
     for arg in "${args[@]}"; do
         if [[ "$arg" == "rebuild" ]]; then
             found_rebuild=true
@@ -730,8 +730,10 @@ main() {
             new_args+=("$arg")
         fi
     done
-
+    
     if [[ "$found_rebuild" == "true" ]]; then
+        # Compute IMAGE_NAME for rebuild
+        local project_folder_name
         warn "Rebuilding ClaudeBox Docker image..."
         if docker image inspect "$IMAGE_NAME" &>/dev/null; then
             docker ps -a --filter "label=claudebox.project" -q | xargs -r docker rm -f 2>/dev/null || true
@@ -739,7 +741,7 @@ main() {
         fi
         set -- "${new_args[@]}"
     fi
-
+    
     # Handle help immediately
     if [[ "$found_help" == "true" ]]; then
         if docker image inspect "$IMAGE_NAME" &>/dev/null; then
@@ -770,15 +772,13 @@ main() {
         exit 0
     fi
 
-
+    
     # Compute project folder name early
     local project_folder_name
-    project_folder_name=$(get_project_folder_name "$PROJECT_DIR")
     PROJECT_CLAUDEBOX_DIR="$HOME/.claudebox/$project_folder_name"
-
+    
     # Use project-specific image name
-    IMAGE_NAME="claudebox-${project_folder_name}"
-
+    
     # Handle commands
     [[ "$VERBOSE" == "true" ]] && echo "Command: ${1:-none}" >&2
     case "${1:-}" in
@@ -865,7 +865,7 @@ main() {
             info "Running $cmd command..."
 
             # Create temporary container
-            local temp_container
+            local temp_container="claudebox-temp-${project_folder_name}-$$"
             temp_container=$(docker create "$IMAGE_NAME" sleep infinity)
             docker start "$temp_container" >/dev/null
 
@@ -884,7 +884,7 @@ main() {
 
             # Commit changes back to image
             docker commit "$temp_container" "$IMAGE_NAME" >/dev/null
-            docker rm -f "$temp_container" >/dev/null
+            docker stop "$temp_container" 2>/dev/null || true >/dev/null
 
             success "$cmd completed and saved to image!"
             exit 0
@@ -1009,14 +1009,13 @@ main() {
 
                     # Remove project-specific folder
                     local project_folder_name
-                    project_folder_name=$(get_project_folder_name "$PROJECT_DIR")
                     local project_claudebox_dir="$HOME/.claudebox/$project_folder_name"
     local image_name="claudebox-${project_folder_name}"
 
                     if [[ -d "$project_claudebox_dir" ]]; then
                         rm -rf "$project_claudebox_dir"
                         success "Removed project data folder: $project_claudebox_dir"
-
+    
     # Remove project Docker image
     docker rmi -f "$image_name" 2>/dev/null || true
     success "Removed project Docker image: $image_name"
@@ -1159,7 +1158,7 @@ main() {
             # Show all ClaudeBox images
             echo
             local claudebox_images
-            claudebox_images=$(docker images --filter "reference=claudebox-*" --format "table {{.Repository}}   {{.Tag}}        {{.Size}}" | tail -n +1)
+            claudebox_images=$(docker images --filter "reference=claudebox-*" --format "table {{.Repository}}	{{.Tag}}	{{.Size}}" | tail -n +1)
             if [[ -n "$claudebox_images" ]]; then
                 cecho "ClaudeBox Docker Images:" "$YELLOW"
                 echo "$claudebox_images"
@@ -1599,7 +1598,7 @@ EOF
    local docker_args=()
    [[ "$ENABLE_SUDO" == "true" ]] && docker_args+=("--enable-sudo")
    [[ "$DISABLE_FIREWALL" == "true" ]] && docker_args+=("--disable-firewall")
-
+   
    docker run -it --rm --init \
        -w /workspace \
        -v "$PROJECT_DIR":/workspace \
