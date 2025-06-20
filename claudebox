@@ -518,7 +518,6 @@ DEFAULT_DOMAINS="api.anthropic.com console.anthropic.com statsig.anthropic.com s
 ALLOWED_DOMAINS="$DEFAULT_DOMAINS"
 # Try project-specific allowlist first, then fall back to global
 if [ -f /home/DOCKERUSER/.claudebox/$CLAUDEBOX_PROJECT_NAME/firewall/allowlist ]; then
-    echo "Loading project-specific allowlist"
     while IFS= read -r domain; do
         # Skip comments and empty lines
         [[ "$domain" =~ ^#.* ]] && continue
