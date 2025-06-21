@@ -280,7 +280,6 @@ Each project automatically gets:
 - **Profile Configuration**: `~/.claudebox/profiles/<project-name>.ini`
 - **Python Virtual Environment**: `.venv` created with uv when Python profile is active
 - **Firewall Allowlist**: Customizable per-project network access rules
-- **Memory & Context**: Isolated MCP server data
 - **Claude Configuration**: Project-specific `.claude.json` settings
 
 ### Environment Variables
@@ -288,19 +287,11 @@ Each project automatically gets:
 - `ANTHROPIC_API_KEY` - Your Anthropic API key
 - `NODE_ENV` - Node environment (default: production)
 
-### MCP Configuration
-
-ClaudeBox automatically manages `.mcp.json` with three servers:
-- Memory server for knowledge graphs
-- Sequential thinking server for complex reasoning
-- Context7 server for enhanced context management
-
 ## 🏗️ Architecture
 
 ClaudeBox creates a per-project Debian-based Docker image with:
 - Node.js (via NVM for version flexibility)
 - Claude Code CLI (@anthropic-ai/claude-code)
-- MCP servers (thinking, memory, and context7)
 - User account matching host UID/GID
 - Network firewall (project-specific allowlists)
 - Volume mounts for workspace and configuration
@@ -327,12 +318,6 @@ ClaudeBox automatically handles Docker setup, but if you encounter issues:
 1. The script will add you to the docker group
 2. You may need to log out/in or run `newgrp docker`
 3. Run `claudebox` again
-
-### MCP Servers Not Working
-Ensure your project has the `.mcp.json` configuration:
-```bash
-cat .mcp.json  # Should show memory, sequential-thinking, and context7 servers
-```
 
 ### Profile Installation Failed
 ```bash
