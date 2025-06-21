@@ -1,498 +1,3 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-# Configuration
-DEFAULT_FLAGS=()
-# readonly IMAGE_NAME="claudebox"  # Now computed per project
-readonly DOCKER_USER="claude"
-readonly USER_ID=$(id -u)
-readonly GROUP_ID=$(id -g)
-readonly PROJECT_DIR="$(pwd)"
-
-# Cross-platform script path resolution
-get_script_path() {
-    local source="${BASH_SOURCE[0]:-$0}"
-    while [[ -L "$source" ]]; do
-        local dir="$(cd -P "$(dirname "$source")" && pwd)"
-        source="$(readlink "$source")"
-        [[ $source != /* ]] && source="$dir/$source"
-    done
-    echo "$(cd -P "$(dirname "$source")" && pwd)/$(basename "$source")"
-}
-readonly SCRIPT_PATH="$(get_script_path)"
-
-readonly CLAUDE_DATA_DIR="$HOME/.claude"
-readonly LINK_TARGET="$HOME/.local/bin/claudebox"
-readonly NODE_VERSION="--lts"
-
-# Color codes
-readonly RED='\033[0;31m'
-readonly GREEN='\033[0;32m'
-readonly YELLOW='\033[1;33m'
-readonly BLUE='\033[0;34m'
-readonly PURPLE='\033[0;35m'
-readonly CYAN='\033[0;36m'
-readonly WHITE='\033[1;37m'
-readonly NC='\033[0m'
-
-# Utility functions
-cecho() { echo -e "${2:-$NC}$1${NC}"; }
-error() { cecho "$1" "$RED" >&2; exit "${2:-1}"; }
-warn() { cecho "$1" "$YELLOW"; }
-info() { cecho "$1" "$BLUE"; }
-success() { cecho "$1" "$GREEN"; }
-
-# Parse early flags
-VERBOSE=false
-ENABLE_SUDO=false
-DISABLE_FIREWALL=false
-DOCKER_ARGS=()
-
-for arg in "$@"; do
-    case "$arg" in
-        -v|--verbose) VERBOSE=true ;;
-        --enable-sudo) ENABLE_SUDO=true ;;
-        --disable-firewall) DISABLE_FIREWALL=true ;;
-        save)
-            shift
-            defaults_file="$HOME/.claudebox/default-flags"
-
-            if [[ $# -eq 0 ]]; then
-                if [[ -f "$defaults_file" ]]; then
-                    rm -f "$defaults_file"
-                    success "Cleared saved default flags"
-                else
-                    info "No saved default flags to clear"
-                fi
-            else
-                mkdir -p "$HOME/.claudebox"
-                printf '%s\n' "$@" > "$defaults_file"
-                success "Saved default flags: $*"
-                info "These will be applied automatically to all claudebox commands"
-            fi
-            exit 0
-            ;;
-
-    esac
-done
-
-# Load saved default flags if they exist
-if [[ -f "$HOME/.claudebox/default-flags" ]]; then
-    while IFS= read -r flag; do
-        [[ -n "$flag" ]] && DEFAULT_FLAGS+=("$flag")
-    done < "$HOME/.claudebox/default-flags"
-fi
-
-# Add default flags to arguments
-set -- "${DEFAULT_FLAGS[@]}" "$@"
-
-# Logo
-logo() {
-    local cb='
- ██████╗██╗      █████╗ ██╗   ██╗██████╗ ███████╗
-██╔════╝██║     ██╔══██╗██║   ██║██╔══██╗██╔════╝
-██║     ██║     ███████║██║   ██║██║  ██║█████╗
-██║     ██║     ██╔══██║██║   ██║██║  ██║██╔══╝
-╚██████╗███████╗██║  ██║╚██████╔╝██████╔╝███████╗
- ╚═════╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚══════╝
-
-██████╗  ██████╗ ██╗  ██╗ ------ ┌──────────────┐
-██╔══██╗██╔═══██╗╚██╗██╔╝ ------ │ The Ultimate │
-██████╔╝██║   ██║ ╚███╔╝  ------ │ Claude Code  │
-██╔══██╗██║   ██║ ██╔██╗  ------ │  Docker Dev  │
-██████╔╝╚██████╔╝██╔╝ ██╗ ------ │ Environment  │
-╚═════╝  ╚═════╝ ╚═╝  ╚═╝ ------ └──────────────┘
-'
-    while IFS= read -r l; do
-        o="" c=""
-        for ((i=0;i<${#l};i++)); do
-            ch="${l:$i:1}"
-            [[ "$ch" == " " ]] && { o+="$ch"; continue; }
-            cc=$(printf '%d' "'$ch" 2>/dev/null||echo 0)
-            if [[ $cc -ge 32 && $cc -le 126 ]]; then n='\033[33m'
-            elif [[ $cc -ge 9552 && $cc -le 9580 ]]; then n='\033[34m'
-            elif [[ $cc -eq 9608 ]]; then n='\033[31m'
-            else n='\033[37m'; fi
-            [[ "$n" != "$c" ]] && { o+="$n"; c="$n"; }
-            o+="$ch"
-        done
-        echo -e "${o}\033[0m"
-    done <<< "$cb"
-}
-
-# Symlink management
-update_symlink() {
-    if [[ -L "$LINK_TARGET" ]]; then
-        local current_target
-        current_target=$(readlink "$LINK_TARGET" 2>/dev/null || echo "")
-        if [[ "$current_target" != "$SCRIPT_PATH" ]]; then
-            rm -f "$LINK_TARGET"
-            ln -s "$SCRIPT_PATH" "$LINK_TARGET"
-            info "Updated claudebox symlink to current location"
-        fi
-    elif [[ ! -e "$LINK_TARGET" ]]; then
-        mkdir -p "$(dirname "$LINK_TARGET")"
-        if ln -s "$SCRIPT_PATH" "$LINK_TARGET" 2>/dev/null; then
-            success "Created claudebox symlink in $(dirname "$LINK_TARGET")"
-        else
-            warn "Note: Could not create symlink (needs sudo)"
-            warn "Run with sudo or add $(dirname "$LINK_TARGET") to your PATH"
-        fi
-    fi
-}
-
-# Docker checks
-check_docker() {
-    command -v docker &>/dev/null || return 1
-    docker info &>/dev/null || return 2
-    docker ps &>/dev/null || return 3
-    return 0
-}
-
-install_docker() {
-    warn "Docker is not installed."
-    cecho "Would you like to install Docker now? (y/n)" "$CYAN"
-    read -r response
-    [[ "$response" =~ ^[Yy]$ ]] || error "Docker is required. Visit: https://docs.docker.com/engine/install/"
-
-    info "Installing Docker..."
-
-    [[ -f /etc/os-release ]] && . /etc/os-release || error "Cannot detect OS"
-
-    case "${ID:-}" in
-        ubuntu|debian)
-            warn "Installing Docker requires sudo privileges..."
-            sudo apt-get update
-            sudo apt-get install -y ca-certificates curl gnupg lsb-release
-            sudo mkdir -p /etc/apt/keyrings
-            curl -fsSL "https://download.docker.com/linux/$ID/gpg" | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-            echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/$ID $(lsb_release -cs) stable" | \
-                sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-            sudo apt-get update
-            sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-            ;;
-        fedora|rhel|centos)
-            warn "Installing Docker requires sudo privileges..."
-            sudo dnf -y install dnf-plugins-core
-            sudo dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
-            sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-            sudo systemctl start docker
-            sudo systemctl enable docker
-            ;;
-        arch|manjaro)
-            warn "Installing Docker requires sudo privileges..."
-            sudo pacman -S --noconfirm docker
-            sudo systemctl start docker
-            sudo systemctl enable docker
-            ;;
-        *)
-            error "Unsupported OS: ${ID:-unknown}. Visit: https://docs.docker.com/engine/install/"
-            ;;
-    esac
-
-    success "Docker installed successfully!"
-    configure_docker_nonroot
-}
-
-configure_docker_nonroot() {
-    warn "Configuring Docker for non-root usage..."
-    warn "This requires sudo to add you to the docker group..."
-
-    getent group docker >/dev/null || sudo groupadd docker
-    sudo usermod -aG docker "$USER"
-
-    success "Docker configured for non-root usage!"
-    warn "You need to log out and back in for group changes to take effect."
-    warn "Or run: ${CYAN}newgrp docker"
-    warn "Then run 'claudebox' again."
-    info "Trying to activate docker group in current shell..."
-    exec newgrp docker
-}
-
-# Spinner
-show_spinner() {
-    local pid=$1 msg=$2 spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏' i=0
-    echo -n "$msg "
-    while kill -0 "$pid" 2>/dev/null; do
-        printf "\b%s" "${spin:i++%${#spin}:1}"
-        sleep 0.1
-    done
-    echo -e "\b${GREEN}✓${NC}"
-}
-
-# Profile definitions
-declare -A PROFILES PROFILE_DESCRIPTIONS
-PROFILES[c]="build-essential gcc g++ gdb valgrind cmake ninja-build clang clang-format clang-tidy cppcheck doxygen libboost-all-dev autoconf automake libtool pkg-config libcmocka-dev libcmocka0 lcov libncurses5-dev libncursesw5-dev"
-PROFILE_DESCRIPTIONS[c]="C/C++ Development (compilers, debuggers, analyzers, build tools, cmocka, coverage, ncurses)"
-PROFILES[openwrt]="build-essential gcc g++ make git wget unzip sudo file python3 python3-distutils rsync libncurses5-dev zlib1g-dev gawk gettext libssl-dev xsltproc libelf-dev libtool automake autoconf ccache subversion swig time qemu-system-arm qemu-system-aarch64 qemu-system-mips qemu-system-x86 qemu-utils"
-PROFILE_DESCRIPTIONS[openwrt]="OpenWRT Development (cross-compilation, QEMU, build essentials)"
-PROFILES[rust]="curl build-essential pkg-config libssl-dev"
-PROFILE_DESCRIPTIONS[rust]="Rust Development (cargo and rustc will be installed separately)"
-PROFILES[python]="python3 python3-pip python3-venv python3-dev build-essential libffi-dev libssl-dev"
-PROFILE_DESCRIPTIONS[python]="Python Development (Python 3, pip, venv, build tools)"
-PROFILES[go]="wget git build-essential"
-PROFILE_DESCRIPTIONS[go]="Go Development (Go will be installed separately)"
-PROFILES[javascript]="build-essential python3"
-PROFILE_DESCRIPTIONS[javascript]="JavaScript/TypeScript Development (Node.js, npm, yarn)"
-PROFILES[java]="openjdk-17-jdk maven gradle ant"
-PROFILE_DESCRIPTIONS[java]="Java Development (OpenJDK 17, Maven, Gradle, Ant)"
-PROFILES[ruby]="ruby-full ruby-dev build-essential zlib1g-dev libssl-dev libreadline-dev libyaml-dev libsqlite3-dev sqlite3 libxml2-dev libxslt1-dev libcurl4-openssl-dev software-properties-common libffi-dev"
-PROFILE_DESCRIPTIONS[ruby]="Ruby Development (Ruby, gems, build tools)"
-PROFILES[php]="php php-cli php-fpm php-mysql php-pgsql php-sqlite3 php-curl php-gd php-mbstring php-xml php-zip composer"
-PROFILE_DESCRIPTIONS[php]="PHP Development (PHP, Composer, common extensions)"
-PROFILES[database]="postgresql-client mysql-client sqlite3 redis-tools mongodb-clients"
-PROFILE_DESCRIPTIONS[database]="Database Tools (PostgreSQL, MySQL, SQLite, Redis, MongoDB clients)"
-PROFILES[devops]="docker.io docker-compose kubectl helm terraform ansible awscli"
-PROFILE_DESCRIPTIONS[devops]="DevOps Tools (Docker, K8s, Terraform, Ansible, AWS CLI)"
-PROFILES[web]="nginx apache2-utils curl wget httpie jq"
-PROFILE_DESCRIPTIONS[web]="Web Development Tools (nginx, curl, httpie, jq)"
-PROFILES[embedded]="gcc-arm-none-eabi gdb-multiarch openocd picocom minicom screen platformio"
-PROFILE_DESCRIPTIONS[embedded]="Embedded Development (ARM toolchain, debuggers, serial tools)"
-PROFILES[datascience]="python3-numpy python3-pandas python3-scipy python3-matplotlib python3-seaborn jupyter-notebook r-base"
-PROFILE_DESCRIPTIONS[datascience]="Data Science (NumPy, Pandas, Jupyter, R)"
-PROFILES[security]="nmap tcpdump wireshark-common netcat-openbsd john hashcat hydra"
-PROFILE_DESCRIPTIONS[security]="Security Tools (network analysis, penetration testing)"
-PROFILES[ml]="python3-pip python3-dev python3-venv build-essential cmake"
-PROFILE_DESCRIPTIONS[ml]="Machine Learning (base tools, Python libs installed separately)"
-
-# Docker operations
-docker_exec_root() {
-    docker exec -u root "$@"
-}
-
-docker_exec_user() {
-    docker exec -u "$DOCKER_USER" "$@"
-}
-
-# Helper functions for project profiles
-get_project_folder_name() {
-    echo "$1" | sed 's|^/||; s|[^a-zA-Z0-9]|_|g; s|_+|_|g; s|^_||; s|_$||'
-}
-
-get_profile_file_path() {
-    local profile_dir="$HOME/.claudebox/profiles"
-    mkdir -p "$profile_dir"
-    echo "$profile_dir/$(echo "$PROJECT_DIR" | sed 's|/|-|g' | sed 's|^-||').ini"
-}
-
-read_profile_section() {
-    local profile_file="$1"
-    local section="$2"
-    local result=()
-
-    if [[ -f "$profile_file" ]] && grep -q "^\[$section\]" "$profile_file"; then
-        while IFS= read -r line; do
-            [[ -z "$line" || "$line" =~ ^\[.*\]$ ]] && break
-            result+=("$line")
-        done < <(sed -n "/^\[$section\]/,/^\[/p" "$profile_file" | tail -n +2 | grep -v '^\[')
-    fi
-
-    printf '%s\n' "${result[@]}"
-}
-
-update_profile_section() {
-    local profile_file="$1"
-    local section="$2"
-    shift 2
-    local new_items=("$@")
-
-    # Read existing items
-    local existing_items=()
-    readarray -t existing_items < <(read_profile_section "$profile_file" "$section")
-
-    # Merge with new items (avoid duplicates)
-    local all_items=()
-    for item in "${existing_items[@]}"; do
-        [[ -n "$item" ]] && all_items+=("$item")
-    done
-
-    for item in "${new_items[@]}"; do
-        local found=false
-        for existing in "${all_items[@]}"; do
-            [[ "$existing" == "$item" ]] && found=true && break
-        done
-        [[ "$found" == "false" ]] && all_items+=("$item")
-    done
-
-    # Write updated profile file
-    {
-        # Preserve other sections
-        if [[ -f "$profile_file" ]]; then
-            awk -v sect="$section" '
-                BEGIN { in_section=0; skip_section=0 }
-                /^\[/ {
-                    if ($0 == "[" sect "]") { skip_section=1; in_section=1 }
-                    else { skip_section=0; in_section=0 }
-                }
-                !skip_section { print }
-                /^\[/ && !skip_section && in_section { in_section=0 }
-            ' "$profile_file"
-        fi
-
-        # Add our section
-        echo "[$section]"
-        for item in "${all_items[@]}"; do
-            echo "$item"
-        done
-        echo ""
-    } > "${profile_file}.tmp" && mv "${profile_file}.tmp" "$profile_file"
-}
-
-# Project-specific folder setup
-setup_project_folder() {
-    mkdir -p "$PROJECT_CLAUDEBOX_DIR/claude-config"
-    mkdir -p "$PROJECT_CLAUDEBOX_DIR/memory"
-    mkdir -p "$PROJECT_CLAUDEBOX_DIR/context"
-    mkdir -p "$PROJECT_CLAUDEBOX_DIR/firewall"
-}
-
-
-# Setup Claude agent command
-setup_claude_agent_command() {
-    mkdir -p .claude/commands
-    cat << 'EOF' > .claude/commands/agent.md
-# Agentic Loop Framework
-<System>
-You are building an **Agentic Loop** that can tackle any complex task with minimal role bloat.
-
-**Core principles**
-
-1. **Single-brain overview** – One Orchestrator owns the big picture.
-2. **Few, powerful agents** – Reuse the same Specialist prompt for parallelism instead of inventing many micro-roles.
-3. **Tight feedback** – A dedicated Evaluator grades outputs (0-100) and suggests concrete fixes until quality ≥ TARGET_SCORE.
-4. **Shared context** – Every agent receives the same `context.md` so no information is siloed.
-5. **Repo-aware** – The Orchestrator decides whether to align to the current repo or create a generic loop.
-6. **Explicit imperatives** – Use the labels **“You Must”** or **“Important”** for non-negotiable steps; permit extra compute with **“Think hard”** / **“ultrathink”**.
-
-</System>
-
-<Context>
-**Task**: <<USER_DESCRIBED_TASK>>
-**Repo path (if any)**: <<ABSOLUTE_PATH_OR_NONE>>
-**Desired parallelism**: <<N_PARALLEL_SPECIALISTS>>  (1-3 is typical)
-
-The Orchestrator must decide:
-
-- Whether to specialise the workflow to this repo or keep it generic.
-- How many identical Specialist instances to launch (0 = sequential).
-</Context>
-
-<Instructions>
-
-### 0  Bootstrap
-- **You Must** create `./docs/<TASK>/context.md` containing this entire block so all agents share it.
-
-### 1  Orchestrator
-```
-
-# Orchestrator — codename “Atlas”
-
-You coordinate everything.
-
-You Must:
-
-1. Parse `context.md`.
-2. Decide repo-specific vs generic flow.
-3. Spawn N parallel **Specialist** agents with shared context.
-
-   * If N > 1, allocate sub-tasks or file patches to avoid merge conflicts.
-4. After Specialists finish, send their outputs to the **Evaluator**.
-5. If Evaluator’s score < TARGET\_SCORE (default = 90), iterate:
-   a. Forward feedback to Specialists.
-   b. **Think hard** and relaunch refined tasks.
-6. On success, run the *Consolidate* step (below) and write the final artefacts to
-   `./outputs/<TASK>_<TIMESTAMP>/final/`.
-   Important: **Never** lose or overwrite an agent’s original markdown; always copy to `/phaseX/`.
-
-```
-
-### 2  Specialist
-```
-
-# Specialist — codename “Mercury”
-
-Role: A multi-disciplinary expert who can research, code, write, and test.
-
-Input: full `context.md` plus Orchestrator commands.
-Output: Markdown file in `/phaseX/` that fully addresses your assigned slice.
-
-You Must:
-
-1. Acknowledge uncertainties; request missing info instead of hallucinating.
-2. Use TDD if coding: write failing unit tests first, then code till green.
-3. Tag heavyweight reasoning with **ultrathink** (visible to Evaluator).
-4. Deliver clean, self-contained markdown.
-
-```
-
-### 3  Evaluator
-```
-
-# Evaluator — codename “Apollo”
-
-Role: Critically grade each Specialist bundle.
-
-Input: Specialist outputs.
-Output: A file `evaluation_phaseX.md` containing:
-
-* Numeric score 0-100
-* Up to 3 strengths
-* Up to 3 issues
-* Concrete fix suggestions
-  Verdict: `APPROVE` ▼or `ITERATE`.
-  You Must be specific and ruthless; no rubber-stamping.
-
-```
-
-### 4  Consolidate (Orchestrator-run)
-```
-
-You Must merge approved Specialist outputs, remove duplication, and ensure:
-
-* Consistent style
-* All referenced files exist
-* README or equivalent final deliverable is complete
-
-```
-</Instructions>
-
-<Constraints>
-- Keep total roles fixed at **three** (Atlas, Mercury, Apollo).
-- Avoid unnecessary follow-up questions; ask only if a missing piece blocks progress.
-- Use markdown only; no emojis or decorative unicode.
-- Absolute paths, filenames, and directory layout must match reality.
-</Constraints>
-
-<Output Format>
-```
-
-✅ Created/updated: ./docs/<TASK>/context.md
-✅ Created/updated: ./.claude/commands/<TASK>.md   # Orchestrator
-✅ Created/updated: ./docs/<TASK>/specialist.md    # Mercury
-✅ Created/updated: ./docs/<TASK>/evaluator.md     # Apollo
-
-📁 Runtime outputs: ./outputs/<TASK>\_<TIMESTAMP>/
-
-```
-</Output Format>
-
-<User Input>
-```
-
-What is the topic or role of the agent loop you want to create?
-Provide any necessary details and I’ll generate the minimal, high-fidelity workflow.
-
-```
-</User Input>
-```
-EOF
-}
-
-# Create files to copy into the image
-create_build_files() {
-    local build_context="$1"
-
-    cat > "$build_context/init-firewall.sh" << 'EOF'
 #!/bin/bash
 set -euo pipefail
 if [ "${DISABLE_FIREWALL:-false}" = "true" ]; then
@@ -574,7 +79,7 @@ fi
 iptables -P OUTPUT DROP
 iptables -P INPUT DROP
 echo "Firewall initialized with Anthropic-only access"
-rm -f "$0"
+rm -f "$(realpath "$0")"
 EOF
 
     cat > "$build_context/claude-wrapper" << 'EOF'
@@ -592,7 +97,7 @@ if [[ -s "$NVM_DIR/nvm.sh" ]]; then
 else
     echo "Warning: NVM not found at $NVM_DIR" >&2
 fi
-
+rm -f "$(realpath "$0")"
 # Execute claude with all arguments
 exec claude "$@"
 EOF
@@ -628,7 +133,7 @@ if [ -d /home/DOCKERUSER/.claudebox/$CLAUDEBOX_PROJECT_NAME ]; then
         cp /home/DOCKERUSER/.claude.json.host /home/DOCKERUSER/.claudebox/$CLAUDEBOX_PROJECT_NAME/.claude.json
         chown DOCKERUSER:DOCKERUSER /home/DOCKERUSER/.claudebox/$CLAUDEBOX_PROJECT_NAME/.claude.json
     fi
-    
+
     # If project-specific .claude.json exists, symlink it
     if [ -f /home/DOCKERUSER/.claudebox/$CLAUDEBOX_PROJECT_NAME/.claude.json ]; then
         rm -f /home/DOCKERUSER/.claude.json
@@ -648,7 +153,7 @@ fi
 if [ -n "$CLAUDEBOX_PROJECT_NAME" ]; then
     PROFILE_FILE="/home/DOCKERUSER/.claudebox/profiles/${CLAUDEBOX_PROJECT_NAME}.ini"
 
-    if command -v uv >/dev/null 2>&1 && [ -f "$PROFILE_FILE" ] && grep -q "python" "$PROFILE_FILE"; then
+    if command -v uv >/dev/null 2>&1 && [ -f "$PROFILE_FILE" ] && grep -qE 'python|ml|datascience' "$PROFILE_FILE"; then
         if [ ! -d /home/DOCKERUSER/.claudebox/$CLAUDEBOX_PROJECT_NAME/.venv ]; then
             su - DOCKERUSER -c "uv venv /home/DOCKERUSER/.claudebox/$CLAUDEBOX_PROJECT_NAME/.venv"
             if [ -f /workspace/pyproject.toml ]; then
@@ -698,7 +203,9 @@ run_docker_build() {
 # Main execution
 main() {
     update_symlink
-
+    local project_folder_name
+    project_folder_name=$(get_project_folder_name "$PROJECT_DIR")
+    IMAGE_NAME="claudebox-${project_folder_name}"
     # Check Docker
     local docker_status
     docker_status=$(check_docker; echo $?)
@@ -717,29 +224,38 @@ main() {
             ;;
     esac
 
-    # Check for rebuild and help anywhere in arguments
+    # Check for rebuild, help, and verbose flags anywhere in arguments
     local args=("$@")
     local new_args=()
     local found_rebuild=false
     local found_help=false
-    
+    local VERBOSE=false
+
     for arg in "${args[@]}"; do
         if [[ "$arg" == "rebuild" ]]; then
             found_rebuild=true
-        elif [[ "$arg" == "help" || "$arg" == "--help" || "$arg" == "-h" ]]; then
-            found_help=true
+        elif [[ "$arg" == "--verbose" ]]; then
+            VERBOSE=true
+            # strip it out so it doesn't become $1 later
+        elif [[ "$arg" == "-h" || "$arg" == "--help" || "$arg" == "help" ]]; then
+            # only global-help if it's literally the first token
+            if [[ "${args[0]}" == "$arg" ]]; then
+                found_help=true
+            fi
             new_args+=("$arg")
         elif [[ "$arg" == "--enable-sudo" || "$arg" == "--disable-firewall" ]]; then
-            # These are handled separately, don't add to new_args
+            # handled below
             continue
         else
             new_args+=("$arg")
         fi
     done
-    
+
     if [[ "$found_rebuild" == "true" ]]; then
         # Compute IMAGE_NAME for rebuild
         local project_folder_name
+        project_folder_name=$(get_project_folder_name "$PROJECT_DIR")
+        IMAGE_NAME="claudebox-${project_folder_name}"
         warn "Rebuilding ClaudeBox Docker image..."
         if docker image inspect "$IMAGE_NAME" &>/dev/null; then
             docker ps -a --filter "label=claudebox.project" -q | xargs -r docker rm -f 2>/dev/null || true
@@ -747,7 +263,15 @@ main() {
         fi
         set -- "${new_args[@]}"
     fi
-    
+
+    # Compute project folder name early
+    local project_folder_name
+        project_folder_name=$(get_project_folder_name "$PROJECT_DIR")
+        IMAGE_NAME="claudebox-${project_folder_name}"
+    project_folder_name=$(get_project_folder_name "$PROJECT_DIR")
+    IMAGE_NAME="claudebox-${project_folder_name}"
+    PROJECT_CLAUDEBOX_DIR="$HOME/.claudebox/$project_folder_name"
+
     # Handle help immediately
     if [[ "$found_help" == "true" ]]; then
         if docker image inspect "$IMAGE_NAME" &>/dev/null; then
@@ -757,7 +281,7 @@ main() {
                 "$IMAGE_NAME" --help | sed '1s/claude/claudebox/g'
             echo
             cecho "Added Options:" "$WHITE"
-            echo -e "${CYAN}  -v, --verbose                   ${WHITE}Show detailed output"
+            echo -e "${CYAN}  --verbose                       ${WHITE}Show detailed output"
             echo -e "${CYAN}  --enable-sudo                   ${WHITE}Enable sudo without password"
             echo -e "${CYAN}  --disable-firewall              ${WHITE}Disable network restrictions"
             echo
@@ -778,15 +302,6 @@ main() {
         exit 0
     fi
 
-    
-    # Compute project folder name early
-    local project_folder_name
-    project_folder_name=$(get_project_folder_name "$PROJECT_DIR")
-    IMAGE_NAME="claudebox-${project_folder_name}"
-    PROJECT_CLAUDEBOX_DIR="$HOME/.claudebox/$project_folder_name"
-    
-    # Use project-specific image name
-    
     # Handle commands
     [[ "$VERBOSE" == "true" ]] && echo "Command: ${1:-none}" >&2
     case "${1:-}" in
@@ -839,7 +354,24 @@ main() {
                 set -- "${remaining[@]}"
             fi
             ;;
+        save)
+            shift
+            defaults_file="$HOME/.claudebox/default-flags"
 
+            if [[ $# -eq 0 ]]; then
+                if [[ -f "$defaults_file" ]]; then
+                    rm -f "$defaults_file"
+                    success "Cleared saved default flags"
+                else
+                    info "No saved default flags to clear"
+                fi
+            else
+                mkdir -p "$HOME/.claudebox"
+                printf '%s\n' "$@" > "$defaults_file"
+                success "Saved default flags: $*"
+            fi
+            exit 0
+                        ;;
         install)
             shift
             [[ $# -eq 0 ]] && error "No packages specified. Usage: claudebox install <package1> <package2> ..."
@@ -866,7 +398,9 @@ main() {
         update|config|mcp|migrate-installer)
             [[ ! -f /.dockerenv ]] && docker image inspect "$IMAGE_NAME" &>/dev/null || \
                 error "ClaudeBox image not found.\nRun ${GREEN}claudebox${NC} first to build the image."
-
+                        local project_folder_name
+                        project_folder_name=$(get_project_folder_name "$PROJECT_DIR")
+                        IMAGE_NAME="claudebox-${project_folder_name}"
             local cmd=$1
             shift
 
@@ -874,8 +408,14 @@ main() {
 
             # Create temporary container
             local temp_container="claudebox-temp-${project_folder_name}-$$"
-            temp_container=$(docker create "$IMAGE_NAME" sleep infinity)
-            docker start "$temp_container" >/dev/null
+            docker run -d --name "$temp_container" \
+                -v "$PROJECT_DIR":/workspace \
+                -v "$CLAUDE_DATA_DIR":/home/$DOCKER_USER/.claude \
+                -v "$HOME/.claudebox":/home/$DOCKER_USER/.claudebox \
+                -v "$HOME/.config/claude":/home/$DOCKER_USER/.config/claude \
+                -v "$HOME/.claude.json":/home/$DOCKER_USER/.claude.json.host:ro \
+                -e "CLAUDEBOX_PROJECT_NAME=$project_folder_name" \
+                "$IMAGE_NAME" --shell-mode >/dev/null
 
             if [[ "$cmd" == "update" ]]; then
                 info "Updating Claude code..."
@@ -893,6 +433,7 @@ main() {
             # Commit changes back to image
             docker commit "$temp_container" "$IMAGE_NAME" >/dev/null
             docker stop "$temp_container" 2>/dev/null || true >/dev/null
+            docker rm "$temp_container" 2>/dev/null || true
 
             success "$cmd completed and saved to image!"
             exit 0
@@ -1017,13 +558,15 @@ main() {
 
                     # Remove project-specific folder
                     local project_folder_name
+        project_folder_name=$(get_project_folder_name "$PROJECT_DIR")
+        IMAGE_NAME="claudebox-${project_folder_name}"
                     local project_claudebox_dir="$HOME/.claudebox/$project_folder_name"
     local image_name="claudebox-${project_folder_name}"
 
                     if [[ -d "$project_claudebox_dir" ]]; then
                         rm -rf "$project_claudebox_dir"
                         success "Removed project data folder: $project_claudebox_dir"
-    
+
     # Remove project Docker image
     docker rmi -f "$image_name" 2>/dev/null || true
     success "Removed project Docker image: $image_name"
@@ -1063,7 +606,7 @@ main() {
                     "$IMAGE_NAME" --help | sed '1s/claude/claudebox/g'
                 echo
                 cecho "Added Options:" "$WHITE"
-                echo -e "${CYAN}  -v, --verbose                   ${WHITE}Show detailed output"
+                echo -e "${CYAN}  --verbose                       ${WHITE}Show detailed output"
                 echo -e "${CYAN}  --enable-sudo                   ${WHITE}Enable sudo without password"
                 echo -e "${CYAN}  --disable-firewall              ${WHITE}Disable network restrictions"
                 echo
@@ -1200,8 +743,6 @@ main() {
             done
         done
 
-        # Create a hash of current profiles
-        # Create a hash of current profiles
         if [[ ${#current_profiles[@]} -gt 0 ]]; then
             profile_hash=$(printf '%s\n' "${current_profiles[@]}" | sort | sha256sum | cut -d' ' -f1)
         fi
@@ -1223,16 +764,19 @@ main() {
         need_rebuild=true
     fi
 
-    # Build image if needed
-    if [[ "$need_rebuild" == "true" ]] || ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
-        logo
-        local build_context
-        build_context=$(mktemp -d /tmp/claudebox-build.XXXXXX)
-        local dockerfile="$build_context/Dockerfile"
-        trap "rm -rf '$build_context'" EXIT
+        # Build image if needed
+        if [[ "$need_rebuild" == "true" ]] || ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
+                logo
+                local build_context="$HOME/.claudebox/build"
+                mkdir -p "$build_context"
+                local dockerfile="$build_context/Dockerfile"
 
-        # Create files locally first
         create_build_files "$build_context"
+
+    # Get the latest delta version at build time
+    info "Fetching latest git-delta version..."
+    LATEST_DELTA_VERSION=$(curl -s https://api.github.com/repos/dandavison/delta/releases/latest | grep -Po '"tag_name": "\K[^"]*')
+    info "Using git-delta version: $LATEST_DELTA_VERSION"
 
         cat > "$dockerfile" <<'DOCKERFILE'
 FROM debian:bookworm
@@ -1243,46 +787,23 @@ RUN echo '#!/bin/sh\nexit 101' > /usr/sbin/policy-rc.d && chmod +x /usr/sbin/pol
 # Install locales first to fix locale warnings
 RUN export DEBIAN_FRONTEND=noninteractive && \
     apt-get update -qq && \
-    apt-get install -y -qq --no-install-recommends apt-utils && \
-    apt-get install -y -qq locales && \
-    echo "en_US.UTF-8 UTF-8" > /etc/locale.gen && \
-    locale-gen en_US.UTF-8 && \
-    rm -rf /var/lib/apt/lists/*
+        apt-get install -y --no-autoremove --no-install-recommends nala curl locales && apt-get clean && \
+    echo "en_US.UTF-8 UTF-8" > /etc/locale.gen && locale-gen en_US.UTF-8 &&\
+        curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && \
+    chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg]" \
+    "https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null && nala update && \
+        nala install -y --no-autoremove --no-install-recommends apt-utils wget zsh fzf gnupg ca-certificates sudo git iptables ipset gh unzip jq \
+        sudo procps vim nano less ca-certificates && \
+        rm -rf /var/lib/apt/lists/*
 
 # Set locale environment variables
 ENV LANG=en_US.UTF-8 \
     LANGUAGE=en_US:en \
     LC_ALL=en_US.UTF-8
 
-RUN export DEBIAN_FRONTEND=noninteractive && \
-    apt-get update -qq && \
-    apt-get install -y -qq curl gnupg ca-certificates sudo git iptables ipset && \
-    apt-get clean
-
 RUN groupadd -g $GROUP_ID $USERNAME || true && \
     useradd -m -u $USER_ID -g $GROUP_ID -s /bin/bash $USERNAME
-
-# Persist bash history
-RUN SNIPPET="export PROMPT_COMMAND='history -a' && export HISTFILE=/commandhistory/.bash_history" \
-    && mkdir /commandhistory \
-    && touch /commandhistory/.bash_history \
-    && chown -R $USERNAME /commandhistory
-
-RUN export DEBIAN_FRONTEND=noninteractive && \
-    apt-get update -qq && \
-    apt-get install -y -qq \
-    build-essential git wget curl unzip file vim nano \
-    jq make less rsync openssh-client \
-    procps sudo fzf zsh man-db gnupg2 \
-    iptables ipset iproute2 dnsutils aggregate && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
-
-RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && \
-    chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg && \
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null && \
-    apt update -qq && \
-    apt install gh -y -qq && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
 
 RUN DELTA_VERSION=$(curl -s https://api.github.com/repos/dandavison/delta/releases/latest | grep -Po '"tag_name": "\K[^"]*') && \
     ARCH=$(dpkg --print-architecture) && \
@@ -1298,19 +819,18 @@ RUN sh -c "$(wget -O- https://github.com/deluan/zsh-in-docker/releases/download/
     -p fzf \
     -a "source /usr/share/doc/fzf/examples/key-bindings.zsh" \
     -a "source /usr/share/doc/fzf/examples/completion.zsh" \
-    -a "export PROMPT_COMMAND='history -a' && export HISTFILE=/commandhistory/.bash_history" \
-    -a 'export HISTFILE=$HOME/.history/.zsh_history' \
+    -a 'export HISTFILE="/home/$USERNAME/.claudebox/.zsh_history"' \
     -a 'export HISTSIZE=10000' \
     -a 'export SAVEHIST=10000' \
     -a 'setopt HIST_IGNORE_DUPS' \
     -a 'setopt SHARE_HISTORY' \
-    -a 'mkdir -p $HOME/.history' \
     -a 'export NVM_DIR="$HOME/.nvm"' \
     -a '[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"' \
     -a '[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"' \
     -x
 
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+
 RUN echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && \
     echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
 
@@ -1347,108 +867,84 @@ RUN bash -c "source $NVM_DIR/nvm.sh && \
     nvm use default && \
     npm install -g @anthropic-ai/claude-code"
 
-# Copy firewall script
-COPY --chown=$USERNAME --chmod=755 init-firewall.sh /home/$USERNAME/init-firewall.sh
 
 # Install profile packages as separate layers for better caching
 USER root
 DOCKERFILE
-
-        # Add profile installations based on current profiles
         if [[ ${#current_profiles[@]} -gt 0 ]]; then
-            info "Building with profiles: ${current_profiles[*]}"
-            for profile in "${current_profiles[@]}"; do
-                case "$profile" in
-                    c)
-                        cat >> "$dockerfile" <<'DOCKERFILE'
-# C/C++ Development Profile
-RUN export DEBIAN_FRONTEND=noninteractive && \
-    apt-get update -qq && \
-    apt-get install -y -qq build-essential gcc g++ gdb valgrind cmake ninja-build clang clang-format clang-tidy cppcheck doxygen libboost-all-dev autoconf automake libtool pkg-config libcmocka-dev libcmocka0 lcov libncurses5-dev libncursesw5-dev && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+                info "Building with profiles: ${current_profiles[*]}"
 
+                # Resolve and deduplicate all dependency layers
+                resolved_profiles=()
+                for profile in "${current_profiles[@]}"; do
+                        resolved_profiles+=($(expand_profile "$profile"))
+                done
+
+                unique_profiles=($(awk -v RS=' ' '!seen[$1]++' <<< "${resolved_profiles[*]}"))
+
+                # APT install layers (1 per profile)
+                for profile in "${unique_profiles[@]}"; do
+                        pkg_list=(${PROFILES[$profile]:-})
+                        [[ ${#pkg_list[@]} -eq 0 ]] && continue
+
+        cat >> "$dockerfile" <<DOCKERFILE
+# ${PROFILE_DESCRIPTIONS[$profile]}
+RUN export DEBIAN_FRONTEND=noninteractive && \\
+        apt-get update -qq && \\
+        nala install -y --no-autoremove ${pkg_list[*]} && \\
+        nala clean && rm -rf /var/lib/apt/lists/*
 DOCKERFILE
-                        ;;
-                    python)
-                        cat >> "$dockerfile" <<'DOCKERFILE'
-# Python Development Profile (uv-managed Python only)
-RUN export DEBIAN_FRONTEND=noninteractive && \
-    apt-get update -qq && \
-    apt-get install -y -qq build-essential libffi-dev libssl-dev && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
-
-DOCKERFILE
-                        ;;
-                    rust)
-                        cat >> "$dockerfile" <<'DOCKERFILE'
-# Rust Development Profile
-RUN export DEBIAN_FRONTEND=noninteractive && \
-    apt-get update -qq && \
-    apt-get install -y -qq curl build-essential pkg-config libssl-dev && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
-
+                                case "$profile" in
+                                        rust)
+                                                cat >> "$dockerfile" <<'DOCKERFILE'
 USER $USERNAME
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && \
-    echo 'source $HOME/.cargo/env' >> ~/.bashrc && \
-    echo 'source $HOME/.cargo/env' >> ~/.zshrc
+        echo 'source $HOME/.cargo/env' >> ~/.bashrc && \
+        echo 'source $HOME/.cargo/env' >> ~/.zshrc
 USER root
-
 DOCKERFILE
-                        ;;
-                    go)
-                        cat >> "$dockerfile" <<'DOCKERFILE'
-# Go Development Profile
-RUN export DEBIAN_FRONTEND=noninteractive && \
-    apt-get update -qq && \
-    apt-get install -y -qq wget git build-essential && \
-    apt-get clean && rm -rf /var/lib/apt/lists/* && \
-    GO_VERSION="1.21.5" && \
-    wget -q "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" && \
-    tar -C /usr/local -xzf "go${GO_VERSION}.linux-amd64.tar.gz" && \
-    rm "go${GO_VERSION}.linux-amd64.tar.gz" && \
-    echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile.d/go.sh
-
+                                                ;;
+                                        go)
+                                                cat >> "$dockerfile" <<'DOCKERFILE'
+RUN GO_VERSION="1.21.5" && \
+        wget -q "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" && \
+        tar -C /usr/local -xzf "go${GO_VERSION}.linux-amd64.tar.gz" && \
+        rm "go${GO_VERSION}.linux-amd64.tar.gz" && \
+        echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile.d/go.sh
 DOCKERFILE
-                        ;;
-                    javascript)
-                        cat >> "$dockerfile" <<'DOCKERFILE'
-# JavaScript Development Profile
-RUN export DEBIAN_FRONTEND=noninteractive && \
-    apt-get update -qq && \
-    apt-get install -y -qq build-essential python3 && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
-
+                                                ;;
+                                        python)
+                                                cat >> "$dockerfile" <<'DOCKERFILE'
+USER $USERNAME
+RUN ~/.local/bin/uv pip install ipython black mypy pylint pytest ruff poetry pipenv
+USER root
 DOCKERFILE
-                        ;;
-                    java)
-                        cat >> "$dockerfile" <<'DOCKERFILE'
-# Java Development Profile
-RUN export DEBIAN_FRONTEND=noninteractive && \
-    apt-get update -qq && \
-    apt-get install -y -qq openjdk-17-jdk maven gradle ant && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
-
+                                                ;;
+                                        ml)
+                                                cat >> "$dockerfile" <<'DOCKERFILE'
+USER $USERNAME
+RUN ~/.local/bin/uv pip install torch transformers scikit-learn numpy pandas matplotlib
+USER root
 DOCKERFILE
-                        ;;
-                    openwrt)
-                        cat >> "$dockerfile" <<'DOCKERFILE'
-# OpenWRT Development Profile
-RUN export DEBIAN_FRONTEND=noninteractive && \
-    apt-get update -qq && \
-    apt-get install -y -qq build-essential gcc g++ make git wget unzip sudo file python3 python3-distutils rsync libncurses5-dev zlib1g-dev gawk gettext libssl-dev xsltproc libelf-dev libtool automake autoconf ccache subversion swig time qemu-system-arm qemu-system-aarch64 qemu-system-mips qemu-system-x86 qemu-utils && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
-
+                                                ;;
+                                        datascience)
+                                                cat >> "$dockerfile" <<'DOCKERFILE'
+USER $USERNAME
+RUN ~/.local/bin/uv pip install jupyter notebook jupyterlab numpy pandas scipy matplotlib seaborn scikit-learn statsmodels plotly
+USER root
 DOCKERFILE
-                        ;;
-                    ruby|php|database|devops|web|embedded|datascience|security|ml)
-                        warn "Profile $profile not yet implemented in cached build"
-                        ;;
-                    *)
-                        warn "Unknown profile: $profile"
-                        ;;
-                esac
-            done
-        fi
+                                                ;;
+                                        javascript)
+                                                cat >> "$dockerfile" <<'DOCKERFILE'
+USER $USERNAME
+RUN bash -c "source \$NVM_DIR/nvm.sh && npm install -g typescript eslint prettier yarn pnpm"
+USER root
+DOCKERFILE
+                                                ;;
+                                        *) : ;;
+                                esac
+                        done
+                fi
 
         # Add label with profile hash
         echo "# Label the image with the profile hash for change detection" >> "$dockerfile"
@@ -1458,19 +954,19 @@ DOCKERFILE
         cat >> "$dockerfile" <<'DOCKERFILE'
 
 USER $USERNAME
-
 RUN bash -c "source $NVM_DIR/nvm.sh && claude --version"
 
 # Copy Claude wrapper script
 COPY --chown=$USERNAME --chmod=755 claude-wrapper /home/$USERNAME/claude-wrapper
 
-WORKDIR /workspace
+# Copy firewall script
+COPY --chown=$USERNAME --chmod=755 init-firewall /home/$USERNAME/init-firewall
 
+WORKDIR /workspace
 USER root
-# Copy docker entrypoint script
 COPY --chown=$USERNAME docker-entrypoint.sh /usr/local/bin/docker-entrypoint
 RUN sed -i "s/DOCKERUSER/$USERNAME/g" /usr/local/bin/docker-entrypoint && \
-    sed -i "s/DOCKERUSER/$USERNAME/g" /home/$USERNAME/init-firewall.sh && \
+    sed -i "s/DOCKERUSER/$USERNAME/g" /home/$USERNAME/init-firewall && \
     chmod +x /usr/local/bin/docker-entrypoint
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint"]
@@ -1591,13 +1087,13 @@ EOF
        success "Created default allowlist"
    fi
 
-   # Create new container with --rm
+   set -- "${DEFAULT_FLAGS[@]}" "$@"
 
    # Build Docker arguments
    local docker_args=()
    [[ "$ENABLE_SUDO" == "true" ]] && docker_args+=("--enable-sudo")
    [[ "$DISABLE_FIREWALL" == "true" ]] && docker_args+=("--disable-firewall")
-   
+
    docker run -it --rm --init \
        -w /workspace \
        -v "$PROJECT_DIR":/workspace \
