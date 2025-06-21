@@ -196,16 +196,6 @@ claudebox info
 # claudebox-project2  latest    1.8GB
 ```
 
-### MCP Servers
-
-ClaudeBox includes three powerful MCP servers:
-
-1. **Sequential Thinking Server** - For complex problem-solving with revision capabilities
-2. **Memory Server** - Knowledge graph for persistent memory across sessions
-3. **Context7 Server** - Enhanced context management
-
-These are automatically configured and available to Claude within the container.
-
 ### Package Management
 
 ```bash
