@@ -24,22 +24,22 @@ The Ultimate Claude Code Docker Development Environment - Run Claude AI's coding
 
 ## 🚀 What's New in Latest Update
 
-- **Project-Specific Profiles**: Each project maintains its own language profiles and packages
-- **Save Default Flags**: New `save` command to persist your preferred security flags
-- **Multi-Instance Support**: Run multiple ClaudeBox instances simultaneously in different projects
-- **Enhanced Info Command**: View all project profiles and running containers at a glance
-- **Granular Clean Options**: Fine-grained control over cleanup operations
-- **Agentic Loop Framework**: Built-in agent command for complex multi-step workflows
-- **Per-Project Python Environments**: Automatic virtual environment creation with uv
-- **Developer Tools**: GitHub CLI (gh) and Delta (enhanced git diffs) pre-installed
-- **Project Isolation**: Complete separation of settings between different projects
+- **Per-Project Docker Images**: Each project now maintains its own Docker image for complete isolation
+- **Intelligent Layer Caching**: Optimized Docker builds with profile-specific layer caching
+- **Task Engine**: Built-in compact task engine for reliable code generation (`/task`)
+- **Automatic Profile Rebuilding**: Detects profile changes and rebuilds automatically
+- **Enhanced Firewall Templates**: Pre-configured allowlists for GitHub, GitLab, and Bitbucket
+- **Project-Specific Claude Config**: Each project can have its own `.claude.json` settings
+- **Profile Dependencies**: Smart dependency resolution (e.g., C profile includes build tools)
+- **Nala Package Manager**: Faster, more user-friendly package management
+- **Latest Tool Versions**: Auto-detects and installs latest versions of git-delta and other tools
 
 ## ✨ Features
 
 - **Containerized Environment**: Run Claude Code in an isolated Docker container
 - **MCP Servers**: Pre-configured Model Context Protocol servers for thinking and memory
 - **Development Profiles**: Pre-configured language stacks (C/C++, Python, Rust, Go, etc.)
-- **Project-Specific Configuration**: Each project maintains its own profiles, packages, and settings
+- **Project Isolation**: Complete separation of images, settings, and data between projects
 - **Persistent Configuration**: Settings and data persist between sessions
 - **Multi-Instance Support**: Work on multiple projects simultaneously
 - **Package Management**: Easy installation of additional development tools
@@ -85,8 +85,7 @@ claudebox
 claudebox --model opus -c
 
 # Get help
-claudebox help          # ClaudeBox specific help
-claudebox --help        # Combined Claude CLI + ClaudeBox help
+claudebox --help        # Shows Claude help with ClaudeBox additions
 ```
 
 ### Multi-Instance Support
@@ -108,10 +107,12 @@ claudebox profile python ml
 ```
 
 Each project maintains its own:
+- Docker image (`claudebox-<project-name>`)
 - Language profiles and installed packages
 - Firewall allowlist
 - Python virtual environment
 - Memory and context (via MCP)
+- Claude configuration (`.claude.json`)
 
 ### Development Profiles
 
@@ -188,6 +189,11 @@ claudebox info
 # Running ClaudeBox containers:
 # CONTAINER ID   STATUS         COMMAND
 # abc123def      Up 5 minutes   claude
+# 
+# ClaudeBox Docker Images:
+# REPOSITORY          TAG       SIZE
+# claudebox-project1  latest    2.1GB
+# claudebox-project2  latest    1.8GB
 ```
 
 ### MCP Servers
@@ -213,18 +219,18 @@ claudebox shell
 claudebox update
 ```
 
-### Agentic Loop Framework
+### Task Engine
 
-ClaudeBox includes a built-in agent command for complex workflows:
+ClaudeBox contains a compact task engine for reliable code generation tasks:
 
 ```bash
-# In Claude, use the agent command
-/agent
+# In Claude, use the task command
+/task
 
-# This provides an agentic loop framework with:
-# - Orchestrator (Atlas) - Coordinates everything
-# - Specialist (Mercury) - Multi-disciplinary expert
-# - Evaluator (Apollo) - Quality control
+# This provides a systematic approach to:
+# - Breaking down complex tasks
+# - Implementing with quality checks
+# - Iterating until specifications are met
 ```
 
 ### Security Options
@@ -274,16 +280,18 @@ ClaudeBox stores data in:
 - `~/.claude/` - Claude configuration and data
 - `~/.claudebox/` - Global ClaudeBox data
 - `~/.claudebox/profiles/` - Per-project profile configurations
-- `~/.claudebox/<project-name>/` - Project-specific data (memory, context, firewall)
+- `~/.claudebox/<project-name>/` - Project-specific data (memory, context, firewall, .claude.json)
 - Current directory mounted as `/workspace` in container
 
 ### Project-Specific Features
 
 Each project automatically gets:
+- **Docker Image**: `claudebox-<project-name>` with installed profiles
 - **Profile Configuration**: `~/.claudebox/profiles/<project-name>.ini`
 - **Python Virtual Environment**: `.venv` created with uv when Python profile is active
 - **Firewall Allowlist**: Customizable per-project network access rules
 - **Memory & Context**: Isolated MCP server data
+- **Claude Configuration**: Project-specific `.claude.json` settings
 
 ### Environment Variables
 
@@ -299,7 +307,7 @@ ClaudeBox automatically manages `.mcp.json` with three servers:
 
 ## 🏗️ Architecture
 
-ClaudeBox creates a Debian-based Docker image with:
+ClaudeBox creates a per-project Debian-based Docker image with:
 - Node.js (via NVM for version flexibility)
 - Claude Code CLI (@anthropic-ai/claude-code)
 - MCP servers (thinking, memory, and context7)
@@ -307,10 +315,12 @@ ClaudeBox creates a Debian-based Docker image with:
 - Network firewall (project-specific allowlists)
 - Volume mounts for workspace and configuration
 - GitHub CLI (gh) for repository operations
-- Delta for enhanced git diffs
+- Delta for enhanced git diffs (auto-updated to latest)
 - uv for fast Python package management
+- Nala for improved apt package management
 - fzf for fuzzy finding
 - zsh with oh-my-zsh
+- Profile-specific development tools with intelligent layer caching
 
 ## 🤝 Contributing
 
@@ -342,10 +352,17 @@ claudebox rebuild
 claudebox profile <name>
 ```
 
+### Profile Changes Not Taking Effect
+ClaudeBox automatically detects profile changes and rebuilds when needed. If you're having issues:
+```bash
+# Force rebuild
+claudebox rebuild
+```
+
 ### Python Virtual Environment Issues
 ClaudeBox automatically creates a venv when Python profile is active:
 ```bash
-# The venv is created at ~/.claudebox/<project>/venv
+# The venv is created at ~/.claudebox/<project>/.venv
 # It's automatically activated in the container
 claudebox shell
 which python  # Should show the venv python
@@ -360,13 +377,24 @@ ln -s /path/to/claudebox ~/.local/bin/claudebox
 ```
 
 ### Multiple Instance Conflicts
-Each project is isolated, but if you see issues:
+Each project has its own Docker image and is fully isolated. To check status:
 ```bash
-# Check running containers
+# Check all ClaudeBox images and containers
 claudebox info
 
 # Clean project-specific data
 claudebox clean --project
+```
+
+### Build Cache Issues
+If builds are slow or failing:
+```bash
+# Clear Docker build cache
+claudebox clean --cache
+
+# Complete cleanup and rebuild
+claudebox clean --all
+claudebox
 ```
 
 ## 🎉 Acknowledgments
