@@ -37,7 +37,6 @@ The Ultimate Claude Code Docker Development Environment - Run Claude AI's coding
 ## ✨ Features
 
 - **Containerized Environment**: Run Claude Code in an isolated Docker container
-- **MCP Servers**: Pre-configured Model Context Protocol servers for thinking and memory
 - **Development Profiles**: Pre-configured language stacks (C/C++, Python, Rust, Go, etc.)
 - **Project Isolation**: Complete separation of images, settings, and data between projects
 - **Persistent Configuration**: Settings and data persist between sessions
