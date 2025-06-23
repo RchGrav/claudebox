@@ -32,7 +32,7 @@ The Ultimate Claude Code Docker Development Environment - Run Claude AI's coding
 - **Project-Specific Claude Config**: Each project can have its own `.claude.json` settings
 - **Profile Dependencies**: Smart dependency resolution (e.g., C profile includes build tools)
 - **Nala Package Manager**: Faster, more user-friendly package management
-- **Latest Tool Versions**: Auto-detects and installs latest versions of git-delta and other tools
+- **Pinned Tool Versions**: Installs git-delta version 0.17.0 and other fixed tool versions
 
 ## ✨ Features
 
@@ -295,7 +295,7 @@ ClaudeBox creates a per-project Debian-based Docker image with:
 - Network firewall (project-specific allowlists)
 - Volume mounts for workspace and configuration
 - GitHub CLI (gh) for repository operations
-- Delta for enhanced git diffs (auto-updated to latest)
+ - Delta for enhanced git diffs (version 0.17.0)
 - uv for fast Python package management
 - Nala for improved apt package management
 - fzf for fuzzy finding
