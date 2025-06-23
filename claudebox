@@ -24,6 +24,7 @@ readonly SCRIPT_PATH="$(get_script_path)"
 readonly CLAUDE_DATA_DIR="$HOME/.claude"
 readonly LINK_TARGET="$HOME/.local/bin/claudebox"
 readonly NODE_VERSION="--lts"
+readonly DELTA_VERSION="0.17.0"
 
 # Color codes
 readonly RED='\033[0;31m'
@@ -637,6 +638,7 @@ run_docker_build() {
         --build-arg GROUP_ID="$GROUP_ID" \
         --build-arg USERNAME="$DOCKER_USER" \
         --build-arg NODE_VERSION="$NODE_VERSION" \
+        --build-arg DELTA_VERSION="$DELTA_VERSION" \
         -f "$1" -t "$IMAGE_NAME" "$2"
 }
 
@@ -1213,14 +1215,11 @@ main() {
 
         create_build_files "$build_context"
 
-    # Get the latest delta version at build time
-    info "Fetching latest git-delta version..."
-    LATEST_DELTA_VERSION=$(curl -s https://api.github.com/repos/dandavison/delta/releases/latest | grep -Po '"tag_name": "\K[^"]*')
-    info "Using git-delta version: $LATEST_DELTA_VERSION"
+    info "Using git-delta version: $DELTA_VERSION"
 
         cat > "$dockerfile" <<'DOCKERFILE'
 FROM debian:bookworm
-ARG USER_ID GROUP_ID USERNAME NODE_VERSION
+ARG USER_ID GROUP_ID USERNAME NODE_VERSION DELTA_VERSION
 
 RUN echo '#!/bin/sh\nexit 101' > /usr/sbin/policy-rc.d && chmod +x /usr/sbin/policy-rc.d
 
@@ -1245,8 +1244,7 @@ ENV LANG=en_US.UTF-8 \
 RUN groupadd -g $GROUP_ID $USERNAME || true && \
     useradd -m -u $USER_ID -g $GROUP_ID -s /bin/bash $USERNAME
 
-RUN DELTA_VERSION=$(curl -s https://api.github.com/repos/dandavison/delta/releases/latest | grep -Po '"tag_name": "\K[^"]*') && \
-    ARCH=$(dpkg --print-architecture) && \
+RUN ARCH=$(dpkg --print-architecture) && \
     wget -q https://github.com/dandavison/delta/releases/download/${DELTA_VERSION}/git-delta_${DELTA_VERSION}_${ARCH}.deb && \
     dpkg -i git-delta_${DELTA_VERSION}_${ARCH}.deb && \
     rm git-delta_${DELTA_VERSION}_${ARCH}.deb
