@@ -1,0 +1,56 @@
+#!/bin/bash
+set -euo pipefail
+
+export NVM_DIR="$HOME/.nvm"
+
+if [[ -s "$NVM_DIR/nvm.sh" ]]; then
+    \. "$NVM_DIR/nvm.sh"
+    nvm use default >/dev/null 2>&1 || {
+        echo "Warning: Failed to activate default Node version" >&2
+    }
+else
+    echo "Warning: NVM not found at $NVM_DIR" >&2
+fi
+
+# Check if we should persist (update command or non-interactive)
+SHOULD_PERSIST=false
+if [[ "${1:-}" == "update" ]] || [[ ! -t 0 ]] || [[ ! -t 1 ]]; then
+    SHOULD_PERSIST=true
+fi
+
+# Handle update command specially
+if [[ "${1:-}" == "update" ]]; then
+    echo "Running update command..."
+    
+    # Check for stale update lock (older than 5 minutes)
+    lock_file="$HOME/.claude/.update.lock"
+    if [[ -f "$lock_file" ]]; then
+        lock_age=$(( $(date +%s) - $(stat -f %m "$lock_file" 2>/dev/null || stat -c %Y "$lock_file" 2>/dev/null || echo 0) ))
+        if [[ $lock_age -gt 300 ]]; then
+            rm -f "$lock_file"
+        fi
+    fi
+    
+    # Capture the output of claude update to check if already up to date
+    update_output=$(claude update 2>&1)
+    echo "$update_output"
+    
+    # Only run version check if an actual update occurred
+    if echo "$update_output" | grep -q "Successfully updated\|Installing update"; then
+        echo "Verifying update..."
+        claude --version
+    fi
+    exit 0
+fi
+
+# Only remove wrapper in truly interactive mode (not when container will persist)
+if [[ "$SHOULD_PERSIST" == "false" ]]; then
+    rm -f "$(realpath "$0")"
+fi
+
+# If no arguments and stdin is a terminal, run claude in interactive mode
+if [[ $# -eq 0 ]] && [[ -t 0 ]]; then
+    exec claude
+else
+    exec claude "$@"
+fi
