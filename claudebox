@@ -123,6 +123,15 @@ logo() {
 }
 
 update_symlink() {
+    # Skip symlink management if claudebox is already in PATH as a real file
+    if command -v claudebox >/dev/null 2>&1; then
+        local found_path=$(which claudebox 2>/dev/null)
+        if [[ -f "$found_path" ]] && [[ ! -L "$found_path" ]]; then
+            [[ "$VERBOSE" == "true" ]] && info "Claudebox already installed at $found_path"
+            return 0
+        fi
+    fi
+    
     # Ensure the directory exists
     mkdir -p "$(dirname "$LINK_TARGET")"
 
@@ -139,8 +148,15 @@ update_symlink() {
             [[ "$VERBOSE" == "true" ]] && info "Removing outdated symlink"
         fi
     elif [[ -e "$LINK_TARGET" ]]; then
-        # Something else exists at this path
-        error "Cannot create symlink: $LINK_TARGET already exists and is not a symlink"
+        # Check if it's the actual claudebox script
+        if [[ -f "$LINK_TARGET" ]] && [[ -x "$LINK_TARGET" ]]; then
+            # It's an executable file, likely the converted claudebox
+            [[ "$VERBOSE" == "true" ]] && info "Found claudebox executable at $LINK_TARGET (not a symlink)"
+            return 0
+        else
+            # Something else exists at this path
+            error "Cannot create symlink: $LINK_TARGET already exists and is not a symlink"
+        fi
     fi
 
     # Create new symlink
@@ -378,6 +394,11 @@ run_claudebox_container() {
             ;;
     esac
     
+    # Add network mode if specified
+    if [[ "${CLAUDEBOX_HOST_MODE:-false}" == "true" ]]; then
+        docker_args+=("--network" "host")
+    fi
+    
     # Standard configuration for ALL containers
     docker_args+=(
         -w /workspace
@@ -488,15 +509,276 @@ show_help() {
     fi
 }
 
+show_welcome_menu() {
+    logo
+    echo
+    cecho "Welcome to ClaudeBox!" "$CYAN"
+    echo
+    cecho "Current directory:" "$WHITE"
+    echo "  $PROJECT_DIR"
+    echo
+    
+    # Check if workspace is set
+    local workspace_file="$HOME/.claudebox/workpath"
+    if [[ -f "$workspace_file" ]]; then
+        local workspace=$(cat "$workspace_file" 2>/dev/null || echo "")
+        if [[ -n "$workspace" ]]; then
+            cecho "Workspace:" "$WHITE"
+            echo "  $workspace"
+            echo
+        fi
+    fi
+    
+    cecho "Getting Started:" "$GREEN"
+    echo -e "  ${YELLOW}claudebox init${NC}                  Initialize this folder as a project"
+    echo -e "  ${YELLOW}claudebox init /path/to/folder${NC}  Initialize a specific folder"
+    echo
+    
+    cecho "Project Management:" "$GREEN"
+    echo -e "  ${YELLOW}claudebox projects${NC}              List all projects"
+    echo -e "  ${YELLOW}claudebox project <name>${NC}       Show project details"
+    echo -e "  ${YELLOW}claudebox <hash>${NC}               Launch project by hash"
+    echo -e "  ${YELLOW}claudebox /path/to/project${NC}     Launch project by path"
+    echo
+    
+    cecho "Other Commands:" "$GREEN"
+    echo -e "  ${YELLOW}claudebox profiles${NC}              List available profiles"
+    echo -e "  ${YELLOW}claudebox help${NC}                  Show detailed help"
+    echo -e "  ${YELLOW}claudebox info${NC}                  Show system information"
+    echo
+    
+    cecho "Quick Tips:" "$PURPLE"
+    echo "  • Run 'claudebox init' to start working on a project"
+    echo "  • Pre-authenticate multiple sessions for concurrent use"
+    echo "  • Use workspace-relative paths for convenience"
+    echo
+}
+
+show_project_status() {
+    local status="$1"  # "not_initialized" or "no_slots"
+    local project_path="${2:-$PROJECT_DIR}"
+    
+    # Get folder name
+    local folder_name=$(basename "$project_path")
+    
+    # Count slots if initialized
+    local slots_used=0
+    local slots_total=0
+    
+    if [[ "$status" == "no_slots" ]]; then
+        # Get the base folder name
+        local clean_name
+        clean_name=$(echo "$project_path" | tr '[:upper:]' '[:lower:]')
+        clean_name="${clean_name//\//_}"
+        clean_name="${clean_name#_}"
+        
+        # Count total slots and used slots
+        for project_dir in "$HOME/.claudebox/projects/${clean_name}_"*/ ; do
+            [[ -d "$project_dir" ]] || continue
+            slots_total=$((slots_total + 1))
+            
+            local lock_file="$project_dir/.lock"
+            if [[ -f "$lock_file" ]]; then
+                local pid=$(cat "$lock_file" 2>/dev/null || echo "")
+                if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+                    slots_used=$((slots_used + 1))
+                fi
+            fi
+        done
+    fi
+    
+    # Display status
+    echo
+    cecho "╔════════════════════════════════════════════════════════════════════╗" "$CYAN"
+    cecho "║                        ClaudeBox Status                            ║" "$CYAN"
+    cecho "╚════════════════════════════════════════════════════════════════════╝" "$CYAN"
+    echo
+    
+    printf "  %-20s %-30s\n" "Project Dir:" "$project_path"
+    printf "  %-20s " "Status:"
+    if [[ "$status" == "not_initialized" ]]; then
+        cecho "Not Initialized" "$YELLOW"
+    else
+        cecho "All slots in use" "$RED"
+    fi
+    printf "  %-20s %-30s\n" "Current Folder:" "$folder_name"
+    printf "  %-20s %-30s\n" "Slots Used/Total:" "${slots_used}/${slots_total}"
+    echo
+    
+    cecho "Available Commands:" "$GREEN"
+    if [[ "$status" == "not_initialized" ]]; then
+        echo -e "  ${YELLOW}claudebox init${NC}                  Initialize this folder"
+        echo -e "  ${YELLOW}claudebox init /path/to/folder${NC}  Initialize a different folder"
+    else
+        echo -e "  ${YELLOW}claudebox init${NC}                  Create another slot for this project"
+    fi
+    echo -e "  ${YELLOW}claudebox projects${NC}              List all projects"
+    echo -e "  ${YELLOW}claudebox project <name>${NC}       Show project details"
+    echo -e "  ${YELLOW}claudebox profiles${NC}              List available profiles"
+    echo -e "  ${YELLOW}claudebox info${NC}                  Show system information"
+    echo
+}
+
+fnv1a_32() {
+    local input_str="${1:-}"
+    local hash_val=2166136261
+    local fnv_prime=16777619
+    local mask_32bit=4294967295
+
+    for (( i=0; i<${#input_str}; i++ )); do
+        local byte
+        byte=$(printf '%d' "'${input_str:$i:1}")
+        hash_val=$(( ((hash_val ^ byte) * fnv_prime) & mask_32bit ))
+    done
+    printf "0x%x\n" "$hash_val"
+}
+
+
+check_if_initialized() {
+    local project_path="$1"
+    local projects_dir="$HOME/.claudebox/projects"
+    
+    # Get the base folder name (without instance suffix)
+    local clean_name
+    clean_name=$(echo "$project_path" | tr '[:upper:]' '[:lower:]')
+    clean_name="${clean_name//\//_}"
+    clean_name="${clean_name#_}"
+    
+    # Check if any folder starting with this clean_name exists
+    if ls "$projects_dir" 2>/dev/null | grep -q "^${clean_name}_"; then
+        return 0  # Initialized
+    else
+        return 1  # Not initialized
+    fi
+}
+
 get_project_folder_name() {
-    local clean_name=$(echo "$1" | sed 's|^/||; s|[^a-zA-Z0-9]|_|g; s|_+|_|g; s|^_||; s|_$||' | tr '[:upper:]' '[:lower:]')
-    local hash=$(echo -n "$1" | sha256sum | cut -c1-6)
-    echo "${clean_name}_${hash}"
+    local project_path="$1"
+    local force_new="${2:-false}"
+    if [ -z "$project_path" ]; then echo "error_invalid_path"; return 1; fi
+
+    local projects_dir="$HOME/.claudebox/projects"
+    mkdir -p "$projects_dir"
+
+    # Get clean name for folder prefix
+    local clean_name
+    clean_name=$(echo "$project_path" | tr '[:upper:]' '[:lower:]')
+    clean_name="${clean_name//\//_}"
+    clean_name="${clean_name#_}"
+    
+    # First iteration always uses direct path hash
+    local parent_hash
+    parent_hash=$(fnv1a_32 "$project_path")
+    local parent_hash_suffix="${parent_hash#0x}"
+    local parent_folder="${clean_name}_${parent_hash_suffix}"
+    local parent_dir="$projects_dir/$parent_folder"
+    
+    # Check if parent exists - if not and we're not initializing, return error
+    if [[ ! -d "$parent_dir" ]] && [[ "$force_new" != "true" ]]; then
+        return 1  # Caller will handle showing not initialized
+    fi
+    
+    # Get max iterations from parent folder (or default to 1)
+    local max_iterations=1
+    local hashcount_file="$parent_dir/.hashcount"
+    if [[ -f "$hashcount_file" ]]; then
+        max_iterations=$(cat "$hashcount_file" 2>/dev/null || echo "1")
+    fi
+    
+    # Start from parent and iterate through the chain
+    local current_hash="$parent_hash_suffix"
+    local iteration=1
+    
+    while [[ $iteration -le $max_iterations ]]; do
+        local project_folder="${clean_name}_${current_hash}"
+        local project_dir="$projects_dir/$project_folder"
+        local lock_file="$project_dir/.lock"
+        
+        # For first iteration, ensure parent directory exists only if initializing
+        if [[ $iteration -eq 1 ]] && [[ "$force_new" == "true" ]]; then
+            mkdir -p "$project_dir"
+        fi
+        
+        # If force_new is true, skip folders that already exist
+        if [[ "$force_new" == "true" ]] && [[ -d "$project_dir" ]]; then
+            # Move to next iteration
+            current_hash=$(fnv1a_32 "$current_hash")
+            current_hash="${current_hash#0x}"
+            iteration=$((iteration + 1))
+            continue
+        fi
+        
+        # Only create directories if forcing new (init) or if slot already exists
+        if [[ ! -d "$project_dir" ]]; then
+            if [[ "$force_new" != "true" ]]; then
+                # Not initializing and slot doesn't exist - skip it
+                current_hash=$(fnv1a_32 "$current_hash")
+                current_hash="${current_hash#0x}"
+                iteration=$((iteration + 1))
+                continue
+            else
+                # Initializing - create the directory
+                mkdir -p "$project_dir"
+            fi
+        fi
+        
+        # Try to acquire lock
+        if mkdir "${lock_file}.acquiring" 2>/dev/null; then
+            if [ -f "$lock_file" ]; then
+                local lock_pid
+                lock_pid=$(cat "$lock_file" 2>/dev/null || echo "")
+                
+                if [ -n "$lock_pid" ] && kill -0 "$lock_pid" 2>/dev/null; then
+                    # Slot is active, try next
+                    rmdir "${lock_file}.acquiring"
+                    current_hash=$(fnv1a_32 "$current_hash")
+                    current_hash="${current_hash#0x}"
+                    iteration=$((iteration + 1))
+                    continue
+                fi
+            fi
+            
+            # Got the slot!
+            echo $$ > "$lock_file"
+            rmdir "${lock_file}.acquiring"
+            
+            # Update max iterations if we've extended beyond it
+            if [[ $iteration -gt $max_iterations ]] && [[ "$force_new" == "true" ]]; then
+                echo "$iteration" > "$hashcount_file"
+            fi
+            
+            export CLAUDEBOX_LOCK_FILE="$lock_file"
+            echo "$project_folder"
+            return 0
+        else
+            sleep 0.1
+        fi
+    done
+    
+    # If we've exhausted all iterations and force_new, extend the chain
+    if [[ "$force_new" == "true" ]]; then
+        max_iterations=$((max_iterations + 1))
+        current_hash=$(fnv1a_32 "$current_hash")
+        current_hash="${current_hash#0x}"
+        local project_folder="${clean_name}_${current_hash}"
+        local project_dir="$projects_dir/$project_folder"
+        mkdir -p "$project_dir"
+        
+        echo "$max_iterations" > "$hashcount_file"
+        echo $$ > "$project_dir/.lock"
+        export CLAUDEBOX_LOCK_FILE="$project_dir/.lock"
+        echo "$project_folder"
+        return 0
+    fi
+    
+    # No available slots found - show status instead of error
+    show_project_status "no_slots" "$project_path"
+    exit 1
 }
 
 get_profile_file_path() {
-    local project_id=$(get_project_folder_name "$PROJECT_DIR")
-    local project_dir="$HOME/.claudebox/projects/$project_id"
+    # Don't call get_project_folder_name here - use the already set project_folder_name
+    local project_dir="$HOME/.claudebox/projects/$project_folder_name"
     mkdir -p "$project_dir"
     echo "$project_dir/config.ini"
 }
@@ -531,6 +813,166 @@ get_project_by_path() {
     return 1
 }
 
+list_all_projects_aggregated() {
+    local projects_found=0
+    local workspace_file="$HOME/.claudebox/workpath"
+    local workspace=""
+    
+    if [[ -f "$workspace_file" ]]; then
+        workspace=$(cat "$workspace_file" 2>/dev/null || echo "")
+    fi
+    
+    # Build associative data using functions for Bash 3.2 compatibility
+    local paths=()
+    local seen_paths=""
+    
+    # First pass - collect unique paths
+    for project_dir in "$HOME/.claudebox/projects"/*/ ; do
+        [[ -d "$project_dir" ]] || continue
+        local config_file="$project_dir/config.ini"
+        local path="(unknown)"
+        
+        if [[ -f "$config_file" ]]; then
+            local path_value=$(read_config_value "$config_file" "project" "path")
+            [[ -n "$path_value" ]] && path="$path_value"
+        fi
+        
+        # Add to paths if not seen
+        if [[ ! " $seen_paths " =~ " $path " ]]; then
+            paths+=("$path")
+            seen_paths="$seen_paths $path"
+        fi
+    done
+    
+    # Sort paths
+    IFS=$'\n' paths=($(printf '%s\n' "${paths[@]}" | sort))
+    
+    # Second pass - aggregate data for each path
+    for path in "${paths[@]}"; do
+        local total_slots=0
+        local active_instances=0
+        local ready_slots=0
+        local total_size=0
+        local has_docker=false
+        
+        # Get all slots for this path
+        for project_dir in "$HOME/.claudebox/projects"/*/ ; do
+            [[ -d "$project_dir" ]] || continue
+            local config_file="$project_dir/config.ini"
+            local this_path="(unknown)"
+            
+            if [[ -f "$config_file" ]]; then
+                local path_value=$(read_config_value "$config_file" "project" "path")
+                [[ -n "$path_value" ]] && this_path="$path_value"
+            fi
+            
+            if [[ "$this_path" == "$path" ]]; then
+                total_slots=$((total_slots + 1))
+                
+                # Check if instance is active
+                local lock_file="$project_dir/.lock"
+                if [[ -f "$lock_file" ]]; then
+                    local pid=$(cat "$lock_file" 2>/dev/null || echo "")
+                    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+                        active_instances=$((active_instances + 1))
+                    else
+                        # Lock file exists but process is dead - this is ready
+                        ready_slots=$((ready_slots + 1))
+                    fi
+                else
+                    # No lock file - check if authenticated
+                    # For now, just count as ready if folder exists
+                    ready_slots=$((ready_slots + 1))
+                fi
+                
+                # Check Docker image
+                local project_id=$(basename "$project_dir")
+                local image_name="claudebox-${project_id}"
+                if docker image inspect "$image_name" &>/dev/null; then
+                    has_docker=true
+                fi
+            fi
+        done
+        
+        # Format display path
+        local display_path="$path"
+        if [[ -n "$workspace" ]] && [[ "$path" == "$workspace"/* ]]; then
+            display_path="${path#$workspace/}"
+        fi
+        
+        # Docker status
+        local docker_icon="❌"
+        [[ "$has_docker" == "true" ]] && docker_icon="✅"
+        
+        # Size placeholder (could aggregate later)
+        local size_str="-"
+        
+        # Status string: instances/ready/total
+        local status="${active_instances}/${ready_slots}/${total_slots}"
+        
+        printf "%10s  %-11s  %s  %s\n" "$size_str" "$status" "$docker_icon" "$display_path"
+        projects_found=1
+    done
+    
+    [[ $projects_found -eq 0 ]] && return 1
+    return 0
+}
+
+list_project_slots() {
+    local project_path="$1"
+    local found=0
+    
+    # Find all slots for this project
+    for project_dir in "$HOME/.claudebox/projects"/*/ ; do
+        [[ -d "$project_dir" ]] || continue
+        local config_file="$project_dir/config.ini"
+        local this_path="(unknown)"
+        
+        if [[ -f "$config_file" ]]; then
+            local path_value=$(read_config_value "$config_file" "project" "path")
+            [[ -n "$path_value" ]] && this_path="$path_value"
+        fi
+        
+        if [[ "$this_path" == "$project_path" ]]; then
+            found=1
+            local project_id=$(basename "$project_dir")
+            local hash="${project_id##*_}"
+            local status_icon="❌"
+            local status_text="Empty slot"
+            
+            # Check lock status
+            local lock_file="$project_dir/.lock"
+            if [[ -f "$lock_file" ]]; then
+                local pid=$(cat "$lock_file" 2>/dev/null || echo "")
+                if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+                    status_icon="🟢"
+                    status_text="Instance (PID: $pid)"
+                else
+                    # Check if authenticated
+                    status_icon="🔑"
+                    status_text="Ready"
+                fi
+            else
+                # Check if slot has data
+                if [[ -d "$project_dir/.claude" ]]; then
+                    status_icon="🔓"
+                    status_text="Not authenticated"
+                fi
+            fi
+            
+            # Check if parent
+            local parent_marker=""
+            local hashcount_file="$project_dir/.hashcount"
+            [[ -f "$hashcount_file" ]] && parent_marker=" (Parent)"
+            
+            printf "%s %s - %s%s\n" "$status_icon" "$hash" "$status_text" "$parent_marker"
+        fi
+    done
+    
+    [[ $found -eq 0 ]] && return 1
+    return 0
+}
+
 list_all_projects() {
     local projects_found=0
     # shellcheck disable=SC2231 # We want pathname expansion even when no dirs
@@ -539,8 +981,25 @@ list_all_projects() {
         projects_found=1
         local project_id=$(basename "$project_dir")
         local original_path="(unknown)"
-        local image_status="❌"
+        local process_status="🟥"
+        local docker_status="❌"
         local image_size="-"
+        
+        # Get hash (last 8 chars of project_id after underscore)
+        local hash="${project_id##*_}"
+        if [[ ${#hash} -gt 8 ]]; then
+            hash="${hash: -8}"
+        fi
+        
+        # Check lock file for process status
+        local lock_file="$project_dir/.lock"
+        if [[ -f "$lock_file" ]]; then
+            local pid=$(cat "$lock_file" 2>/dev/null || echo "")
+            if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+                process_status="🟩"
+            fi
+        fi
+        
         local config_file="$project_dir/config.ini"
         if [[ -f "$config_file" ]]; then
             local path_value=$(read_config_value "$config_file" "project" "path")
@@ -548,17 +1007,77 @@ list_all_projects() {
         fi
         local image_name="claudebox-${project_id}"
         if docker image inspect "$image_name" &>/dev/null; then
-            image_status="✅"
+            docker_status="✅"
             image_size=$(docker images --filter "reference=$image_name" --format "{{.Size}}")
         fi
-        printf "%10s  %s  %s\n" "$image_size" "$image_status" "$original_path"
+        printf "%10s  %s  %s  %8s  %s\n" "$image_size" "$process_status" "$docker_status" "$hash" "$original_path"
     done
     [[ $projects_found -eq 0 ]] && return 1
     return 0
 }
 
+show_projects_list() {
+    cecho "ClaudeBox Projects:" "$CYAN"
+    
+    # Show workspace if set
+    local workspace_file="$HOME/.claudebox/workpath"
+    if [[ -f "$workspace_file" ]]; then
+        local workspace=$(cat "$workspace_file" 2>/dev/null || echo "")
+        if [[ -n "$workspace" ]]; then
+            echo
+            cecho "Workspace: $workspace" "$WHITE"
+        fi
+    fi
+    
+    echo
+    printf "%10s  %-11s  %s  %s\n" "Size" "Slots (I/R/T)" "🐳" "Path"
+    printf "%10s  %-11s  %s  %s\n" "----" "-------------" "--" "----"
+
+    if ! list_all_projects_aggregated; then
+        echo
+        warn "No ClaudeBox projects found."
+        echo
+        cecho "Start a new project:" "$GREEN"
+        echo "  cd /your/project/directory"
+        echo "  claudebox init"
+    fi
+    echo
+    cecho "I=Instances, R=Ready, T=Total" "$CYAN"
+    echo
+}
+
+find_project_by_hash() {
+    local hash="$1"
+    local projects_dir="$HOME/.claudebox/projects"
+    
+    if [[ -d "$projects_dir" ]]; then
+        for project_dir in "$projects_dir"/*; do
+            [[ -d "$project_dir" ]] || continue
+            local project_id=$(basename "$project_dir")
+            
+            # Check if project_id ends with the hash
+            if [[ "$project_id" == *"_$hash" ]]; then
+                echo "$project_id"
+                return 0
+            fi
+        done
+    fi
+    
+    return 1
+}
+
 resolve_project_path() {
     local input_path="${1:-$PWD}"
+
+    # Check if input is a hash (8 hex chars)
+    if [[ "$input_path" =~ ^[0-9a-fA-F]{8}$ ]]; then
+        local project_id
+        project_id=$(find_project_by_hash "$input_path")
+        if [[ -n "$project_id" ]]; then
+            echo "$project_id"
+            return 0
+        fi
+    fi
 
     if [[ "$input_path" =~ _[a-f0-9]{6}$ ]] && [[ -d "$HOME/.claudebox/$input_path" ]]; then
         echo "$input_path"
@@ -911,11 +1430,23 @@ run_docker_build() {
         -f "$1" -t "$IMAGE_NAME" "$2"
 }
 
+cleanup_lock_file() {
+    if [[ -n "${CLAUDEBOX_LOCK_FILE:-}" ]] && [[ -f "$CLAUDEBOX_LOCK_FILE" ]]; then
+        rm -f "$CLAUDEBOX_LOCK_FILE"
+    fi
+}
+
 main() {
+    # Set up cleanup trap
+    trap cleanup_lock_file EXIT
+    
     update_symlink
     local project_folder_name
-    project_folder_name=$(get_project_folder_name "$PROJECT_DIR")
-    IMAGE_NAME="claudebox-${project_folder_name}"
+    project_folder_name=$(get_project_folder_name "$PROJECT_DIR" 2>/dev/null || echo "")
+    # If no project folder, we'll handle it later in the initialization check
+    if [[ -n "$project_folder_name" ]]; then
+        IMAGE_NAME="claudebox-${project_folder_name}"
+    fi
     local docker_status
     docker_status=$(check_docker; echo $?)
     case $docker_status in
@@ -936,22 +1467,116 @@ main() {
     local args=("$@")
     local new_args=()
     local found_rebuild=false
+    local host_mode=false
+    local found_init=false
 
-    for arg in "${args[@]}"; do
+    local init_path=""
+    local skip_next=false
+    
+    for i in "${!args[@]}"; do
+        if [[ "$skip_next" == "true" ]]; then
+            skip_next=false
+            continue
+        fi
+        
+        local arg="${args[$i]}"
+        
         if [[ "$arg" == "rebuild" ]]; then
             found_rebuild=true
         elif [[ "$arg" == "--verbose" ]]; then
             VERBOSE=true
+        elif [[ "$arg" == "--host-mode" ]]; then
+            host_mode=true
+        elif [[ "$arg" == "init" ]]; then
+            found_init=true
+            # Check if next arg is a path
+            local next_arg="${args[$((i+1))]:-}"
+            if [[ -n "$next_arg" ]] && [[ ! "$next_arg" =~ ^- ]] && [[ "$next_arg" != "profile" ]]; then
+                init_path="$next_arg"
+                skip_next=true
+            fi
         else
             new_args+=("$arg")
         fi
     done
     
+    # Update arguments to exclude consumed commands (init, rebuild, etc.)
+    set -- "${new_args[@]}"
+    
+    # Export for use in run_container function
+    export CLAUDEBOX_HOST_MODE="$host_mode"
+    
+    # If init with path, change to that directory
+    if [[ "$found_init" == "true" ]] && [[ -n "$init_path" ]]; then
+        if [[ -d "$init_path" ]]; then
+            cd "$init_path" || error "Cannot access directory: $init_path"
+            PROJECT_DIR="$(pwd)"
+        else
+            error "Directory not found: $init_path"
+        fi
+    fi
+    
+    # Migrate old project folders if needed
+    if [[ -d "$HOME/.claudebox/projects" ]]; then
+        for old_dir in "$HOME/.claudebox/projects"/*; do
+            [[ -d "$old_dir" ]] || continue
+            local old_name=$(basename "$old_dir")
+            
+            # Skip if already in new format (ends with 8 hex chars)
+            if [[ "$old_name" =~ _[0-9a-f]{8}$ ]]; then
+                continue
+            fi
+            
+            # Get the original path from config.ini
+            local config_file="$old_dir/config.ini"
+            if [[ -f "$config_file" ]]; then
+                local original_path=$(read_config_value "$config_file" "project" "path")
+                if [[ -n "$original_path" ]] && [[ "$original_path" != "(unknown)" ]]; then
+                    # Calculate new hash
+                    local new_hash=$(fnv1a_32 "$original_path")
+                    local new_hash_suffix="${new_hash#0x}"
+                    
+                    local clean_name
+                    clean_name=$(echo "$original_path" | tr '[:upper:]' '[:lower:]')
+                    clean_name="${clean_name//\//_}"
+                    clean_name="${clean_name#_}"
+                    
+                    local new_name="${clean_name}_${new_hash_suffix}"
+                    local new_dir="$HOME/.claudebox/projects/$new_name"
+                    
+                    # Rename if new name doesn't exist
+                    if [[ ! -d "$new_dir" ]]; then
+                        mv "$old_dir" "$new_dir" 2>/dev/null || true
+                    fi
+                fi
+            fi
+        done
+    fi
+    
+    # Check if this folder has been initialized
+    if [[ "$found_init" != "true" ]] && [[ "${1:-}" != "info" ]] && ! check_if_initialized "$PROJECT_DIR"; then
+        show_project_status "not_initialized"
+        exit 0
+    fi
+    
     # Set up project variables early - needed by multiple sections
     local project_folder_name
-    project_folder_name=$(get_project_folder_name "$PROJECT_DIR")
-    IMAGE_NAME="claudebox-${project_folder_name}"
-    PROJECT_CLAUDEBOX_DIR="$HOME/.claudebox/projects/$project_folder_name"
+    if [[ "${1:-}" != "info" ]]; then
+        if [[ "$found_init" == "true" ]]; then
+            # Force creation of new folder when init is used
+            project_folder_name=$(get_project_folder_name "$PROJECT_DIR" "true")
+        else
+            project_folder_name=$(get_project_folder_name "$PROJECT_DIR")
+            # Check if get_project_folder_name failed
+            if [[ $? -ne 0 ]]; then
+                # This means no parent folder exists - should not happen here because check_if_initialized should catch it
+                show_project_status "not_initialized"
+                exit 0
+            fi
+        fi
+        IMAGE_NAME="claudebox-${project_folder_name}"
+        PROJECT_CLAUDEBOX_DIR="$HOME/.claudebox/projects/$project_folder_name"
+    fi
 
     if [[ "$found_rebuild" == "true" ]]; then
         warn "Rebuilding ClaudeBox Docker image (no cache)..."
@@ -966,7 +1591,36 @@ main() {
         set -- "${new_args[@]}"
     fi
 
-    mkdir -p "$PROJECT_CLAUDEBOX_DIR"
+    if [[ "${1:-}" != "info" ]]; then
+        mkdir -p "$PROJECT_CLAUDEBOX_DIR"
+        
+        # Handle config.ini symlinking for hash-chained folders
+        if [[ "$found_init" == "true" ]] || ! check_if_initialized "$PROJECT_DIR"; then
+            # Find the original config.ini if this is a hash-chained folder
+            local clean_name
+            clean_name=$(echo "$PROJECT_DIR" | tr '[:upper:]' '[:lower:]')
+            clean_name="${clean_name//\//_}"
+            clean_name="${clean_name#_}"
+            
+            local original_config=""
+            local projects_dir="$HOME/.claudebox/projects"
+            
+            # Look for existing folders with same base name
+            if [[ -d "$projects_dir" ]]; then
+                for dir in "$projects_dir"/${clean_name}_*; do
+                    if [[ -d "$dir" ]] && [[ -f "$dir/config.ini" ]] && [[ "$dir" != "$PROJECT_CLAUDEBOX_DIR" ]]; then
+                        original_config="$dir/config.ini"
+                        break
+                    fi
+                done
+            fi
+            
+            # If we found an original config and our config doesn't exist, symlink it
+            if [[ -n "$original_config" ]] && [[ ! -e "$PROJECT_CLAUDEBOX_DIR/config.ini" ]]; then
+                ln -s "$original_config" "$PROJECT_CLAUDEBOX_DIR/config.ini"
+            fi
+        fi
+    fi
 
     # Check for help flags early - only check first argument
     if [[ "${1:-}" == "-h" || "${1:-}" == "--help" || "${1:-}" == "help" ]]; then
@@ -976,8 +1630,81 @@ main() {
 
     [[ "$VERBOSE" == "true" ]] && echo "Command: ${1:-none}" >&2
     
+    # Save original directory for returning after exit
+    export CLAUDEBOX_ORIGINAL_PWD="$PWD"
+    
+    # Check if first argument is a hash (8 hex chars) for direct project launch
+    if [[ "${1:-}" =~ ^[0-9a-fA-F]{8}$ ]]; then
+        local hash_arg="$1"  # Save the hash before shifting
+        local target_project
+        target_project=$(find_project_by_hash "$hash_arg")
+        if [[ -n "$target_project" ]]; then
+            shift # Remove hash from args
+            
+            # Get the original project path from config
+            local config_file="$HOME/.claudebox/projects/$target_project/config.ini"
+            if [[ -f "$config_file" ]]; then
+                local original_path=$(read_config_value "$config_file" "project" "path")
+                if [[ -n "$original_path" ]] && [[ -d "$original_path" ]]; then
+                    # Launch in the original project directory
+                    cd "$original_path" || error "Cannot access project directory: $original_path"
+                    exec "$0" "$@"
+                else
+                    error "Project path not found or invalid for hash: $hash_arg"
+                fi
+            else
+                error "Project configuration not found for hash: $hash_arg"
+            fi
+        else
+            error "No project found with hash: $hash_arg"
+        fi
+    fi
+    
+    # Check if first argument is a path
+    if [[ "${1:-}" =~ ^/ ]] || [[ -d "${1:-}" ]]; then
+        local path_arg="$1"
+        shift # Remove path from args
+        
+        # Check if it's an absolute path or resolve it
+        local target_path
+        if [[ "$path_arg" =~ ^/ ]]; then
+            target_path="$path_arg"
+        else
+            target_path="$(cd "$path_arg" 2>/dev/null && pwd)" || target_path=""
+        fi
+        
+        if [[ -n "$target_path" ]] && [[ -d "$target_path" ]]; then
+            local target_project
+            target_project=$(get_project_by_path "$target_path")
+            if [[ -n "$target_project" ]]; then
+                cd "$target_path" || error "Cannot access project directory: $target_path"
+                exec "$0" "$@"
+            else
+                error "No project found at path: $path_arg"
+            fi
+        else
+            # Not a valid path, might be a workspace-relative name
+            local workspace_file="$HOME/.claudebox/workpath"
+            if [[ -f "$workspace_file" ]]; then
+                local workspace=$(cat "$workspace_file" 2>/dev/null || echo "")
+                if [[ -n "$workspace" ]]; then
+                    local full_path="$workspace/$path_arg"
+                    if [[ -d "$full_path" ]]; then
+                        local target_project
+                        target_project=$(get_project_by_path "$full_path")
+                        if [[ -n "$target_project" ]]; then
+                            cd "$full_path" || error "Cannot access project directory: $full_path"
+                            exec "$0" "$@"
+                        fi
+                    fi
+                fi
+            fi
+        fi
+    fi
+    
     # First, handle commands that don't require Docker image
     case "${1:-}" in
+            
         profiles)
             shift
             cecho "Available ClaudeBox Profiles:" "$CYAN"
@@ -990,23 +1717,196 @@ main() {
             ;;
 
         projects)
-
+            # Standalone projects command - direct to list
             shift
-            cecho "ClaudeBox Projects:" "$CYAN"
-            echo
-            printf "%10s  %s  %s\n" "Size" "🐳" "Path"
-            printf "%10s  %s  %s\n" "----" "--" "----"
-
-            if ! list_all_projects; then
-                echo
-                warn "No ClaudeBox projects found."
-                echo
-                cecho "Start a new project:" "$GREEN"
-                echo "  cd /your/project/directory"
-                echo "  claudebox"
-            fi
-            echo
+            show_projects_list
             exit 0
+            ;;
+            
+        project)
+            shift
+            case "${1:-}" in
+                list|--list|-l)
+                    shift
+                    show_projects_list
+                    exit 0
+                    ;;
+                    
+                init)
+                    # Same as regular init but clearer naming
+                    found_init=true
+                    set -- "${@:2}"  # Remove 'project init' from args
+                    ;;
+                    
+                launch|open|go)
+                    shift
+                    if [[ -z "$1" ]]; then
+                        error "Please specify a project hash or path"
+                    fi
+                    # Launch project by hash or path
+                    local target_project
+                    target_project=$(resolve_project_path "$1")
+                    if [[ -n "$target_project" ]]; then
+                        shift
+                        local config_file="$HOME/.claudebox/projects/$target_project/config.ini"
+                        if [[ -f "$config_file" ]]; then
+                            local original_path=$(read_config_value "$config_file" "project" "path")
+                            if [[ -n "$original_path" ]] && [[ -d "$original_path" ]]; then
+                                cd "$original_path" || error "Cannot access project directory: $original_path"
+                                exec "$0" "$@"
+                            fi
+                        fi
+                    fi
+                    error "Project not found: $1"
+                    ;;
+                    
+                clean)
+                    # Forward to clean project command
+                    shift
+                    exec "$0" clean project "$@"
+                    ;;
+                    
+                example|examples)
+                    cecho "ClaudeBox Project Examples:" "$CYAN"
+                    echo
+                    cecho "🚀 Initialization:" "$WHITE"
+                    echo "  # Initialize new project with profiles"
+                    echo "  claudebox project init profile python ml"
+                    echo "  claudebox init profile rust go           # Shorthand"
+                    echo
+                    cecho "📋 Launching Projects:" "$WHITE"
+                    echo "  # Launch specific project by hash"
+                    echo "  claudebox project launch 11c26114"
+                    echo "  claudebox 11c26114                       # Direct hash launch"
+                    echo
+                    cecho "🧹 Cleaning Projects:" "$WHITE"
+                    echo "  # Clean current project"
+                    echo "  claudebox project clean data"
+                    echo "  claudebox project clean all"
+                    echo
+                    echo "  # Clean specific projects"
+                    echo "  claudebox project clean /path/to/project all"
+                    echo "  claudebox project clean 11c26114 docker"
+                    echo
+                    echo "  # Clean multiple projects at once"
+                    echo "  claudebox project clean /foo /bar 11c26114 all"
+                    echo
+                    echo "  # Clean all unknown projects"
+                    echo "  claudebox project clean unknown all"
+                    echo
+                    cecho "🔄 Multiple Instances:" "$WHITE"
+                    echo "  # Create additional instance for same project"
+                    echo "  cd /your/project"
+                    echo "  claudebox init                           # Creates new hash-chained folder"
+                    echo
+                    exit 0
+                    ;;
+                    
+                *)
+                    # Check if an argument was provided - might be a project path
+                    if [[ -n "${1:-}" ]]; then
+                        local project_arg="$1"
+                        local target_path=""
+                        
+                        # Check if it's an absolute path
+                        if [[ "$project_arg" =~ ^/ ]]; then
+                            target_path="$project_arg"
+                        else
+                            # Try workspace-relative
+                            local workspace_file="$HOME/.claudebox/workpath"
+                            if [[ -f "$workspace_file" ]]; then
+                                local workspace=$(cat "$workspace_file" 2>/dev/null || echo "")
+                                if [[ -n "$workspace" ]]; then
+                                    target_path="$workspace/$project_arg"
+                                fi
+                            fi
+                        fi
+                        
+                        # If we have a valid path, show project details
+                        if [[ -n "$target_path" ]] && [[ -d "$target_path" ]]; then
+                            cecho "Project: $target_path" "$CYAN"
+                            echo
+                            
+                            # Count slots
+                            local total_slots=0
+                            local active_instances=0
+                            local ready_slots=0
+                            
+                            for project_dir in "$HOME/.claudebox/projects"/*/ ; do
+                                [[ -d "$project_dir" ]] || continue
+                                local config_file="$project_dir/config.ini"
+                                local this_path="(unknown)"
+                                
+                                if [[ -f "$config_file" ]]; then
+                                    local path_value=$(read_config_value "$config_file" "project" "path")
+                                    [[ -n "$path_value" ]] && this_path="$path_value"
+                                fi
+                                
+                                if [[ "$this_path" == "$target_path" ]]; then
+                                    total_slots=$((total_slots + 1))
+                                    local lock_file="$project_dir/.lock"
+                                    if [[ -f "$lock_file" ]]; then
+                                        local pid=$(cat "$lock_file" 2>/dev/null || echo "")
+                                        if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+                                            active_instances=$((active_instances + 1))
+                                        else
+                                            ready_slots=$((ready_slots + 1))
+                                        fi
+                                    else
+                                        ready_slots=$((ready_slots + 1))
+                                    fi
+                                fi
+                            done
+                            
+                            echo "Total slots: $total_slots"
+                            echo
+                            cecho "Slot Status:" "$WHITE"
+                            list_project_slots "$target_path"
+                            echo
+                            echo "Instances: $active_instances, Ready: $ready_slots, Empty: $((total_slots - active_instances - ready_slots))"
+                            exit 0
+                        fi
+                    fi
+                    
+                    # Default help menu
+                    cecho "╔════════════════════════════════════════════════════════════════════════╗" "$CYAN"
+                    cecho "║                       ClaudeBox Project Management                     ║" "$CYAN"
+                    cecho "╚════════════════════════════════════════════════════════════════════════╝" "$CYAN"
+                    echo
+                    
+                    cecho "📋 Commands:" "$WHITE"
+                    echo -e "  ${GREEN}claudebox project list${NC}              List all projects with status"
+                    echo -e "  ${GREEN}claudebox project <name>${NC}            Show project slot details"
+                    echo -e "  ${GREEN}claudebox project init${NC}              Initialize new project in current directory"
+                    echo -e "  ${GREEN}claudebox project launch <hash>${NC}     Launch project by 8-char hash"
+                    echo -e "  ${GREEN}claudebox project clean${NC}             Clean project data"
+                    echo -e "  ${GREEN}claudebox project examples${NC}          Show usage examples"
+                    echo
+                    
+                    cecho "🚀 Quick Launch:" "$WHITE"
+                    echo -e "  ${GREEN}claudebox <hash>${NC}                    Direct launch by project hash"
+                    echo -e "  ${GREEN}claudebox${NC}                           Launch in current directory"
+                    echo
+                    
+                    cecho "ℹ️  Project Structure:" "$CYAN"
+                    echo "  Each project gets a unique folder based on path + hash:"
+                    echo "  ~/.claudebox/projects/<path>_<hash>/"
+                    echo "    ├── config.ini     (profiles & packages)"
+                    echo "    ├── .claude/       (Claude AI data)"
+                    echo "    ├── .claude.json   (Claude config)"
+                    echo "    ├── .config/       (Tool configs)"
+                    echo "    └── .cache/        (Cache data)"
+                    echo
+                    
+                    cecho "🔄 Multiple Instances:" "$CYAN"
+                    echo "  Run 'claudebox init' again to create additional instances"
+                    echo "  Each instance gets a new hash-chained folder"
+                    echo "  All instances share the same config.ini via symlinks"
+                    echo
+                    echo -e "${YELLOW}Run 'claudebox project examples' for usage examples${NC}"
+                    exit 0
+                    ;;
+            esac
             ;;
 
         profile)
@@ -1053,19 +1953,45 @@ main() {
                     exit 0
                     ;;
 
+                example|examples)
+                    cecho "ClaudeBox Profile Examples:" "$CYAN"
+                    echo
+                    cecho "📋 Viewing Profiles:" "$WHITE"
+                    echo "  claudebox profiles                       # List all available profiles"
+                    echo "  claudebox profile status                 # Check current project's profiles"
+                    echo
+                    cecho "🛠️ Installing Profiles:" "$WHITE"
+                    echo "  # Single profile"
+                    echo "  claudebox profile python"
+                    echo "  claudebox profile rust"
+                    echo
+                    echo "  # Multiple profiles"
+                    echo "  claudebox profile python ml"
+                    echo "  claudebox profile c embedded openwrt"
+                    echo
+                    echo "  # With init (new project)"
+                    echo "  claudebox init profile python ml"
+                    echo "  claudebox profile init rust go           # Works in any order"
+                    echo
+                    cecho "📦 Common Combinations:" "$WHITE"
+                    echo "  claudebox profile python ml              # Python + Machine Learning"
+                    echo "  claudebox profile javascript web         # JS + Web Development"
+                    echo "  claudebox profile c embedded             # C + Embedded Systems"
+                    echo "  claudebox profile go devops              # Go + DevOps Tools"
+                    echo
+                    exit 0
+                    ;;
+                    
                 "")
 
                     cecho "ClaudeBox Profile Management:" "$CYAN"
                     echo
                     echo -e "  ${GREEN}profiles${NC}                 Show all available profiles"
                     echo -e "  ${GREEN}profile status${NC}           Show current project's profiles"
-                    echo -e "  ${GREEN}profile <names...>${NC}       Install profiles (e.g., python c rust)"
+                    echo -e "  ${GREEN}profile <names...>${NC}       Install profiles"
+                    echo -e "  ${GREEN}profile examples${NC}         Show usage examples"
                     echo
-                    cecho "Examples:" "$YELLOW"
-                    echo "  claudebox profiles              # See all available profiles"
-                    echo "  claudebox profile status        # Check current project's profiles"
-                    echo "  claudebox profile python        # Install Python development profile"
-                    echo "  claudebox profile c openwrt     # Install C and OpenWRT profiles"
+                    echo -e "${YELLOW}Run 'claudebox profile examples' for usage examples${NC}"
                     exit 0
                     ;;
             esac
@@ -1261,8 +2187,8 @@ main() {
                     fi
                     
                     # Compare hashes of the INSTALLED file
-                    current_hash=$(sha256sum "$installed_path" 2>/dev/null | cut -d" " -f1 || echo "none")
-                    new_hash=$(sha256sum /tmp/claudebox.new | cut -d" " -f1)
+                    current_hash=$(cat "$installed_path" 2>/dev/null | fnv1a_32 || echo "none")
+                    new_hash=$(cat /tmp/claudebox.new | fnv1a_32)
                     
                     if [[ "$current_hash" != "$new_hash" ]]; then
                         info "New version available, updating..."
@@ -1487,116 +2413,219 @@ main() {
                 project)
                     shift
 
-                    local target_path="$PROJECT_DIR"
-                    local project_folder_name
-
-                    if [[ $# -gt 0 ]] && [[ "${1:0:1}" != "-" ]] && [[ "$1" != "all" && "$1" != "data" && "$1" != "docker" && "$1" != "profiles" && "$1" != "tools" ]]; then
-                        target_path="$1"
-                        shift
-
-                        project_folder_name=$(resolve_project_path "$target_path")
-                        if [[ -z "$project_folder_name" ]]; then
-                            error "No ClaudeBox project found at: $target_path"
+                    # Collect projects to clean
+                    local projects_to_clean=()
+                    local clean_unknown=false
+                    local action=""
+                    
+                    # Parse arguments
+                    while [[ $# -gt 0 ]]; do
+                        case "$1" in
+                            all|data|docker|profiles|tools)
+                                action="$1"
+                                shift
+                                break
+                                ;;
+                            unknown)
+                                clean_unknown=true
+                                shift
+                                ;;
+                            *)
+                                # Try to resolve as project path or hash
+                                local resolved
+                                resolved=$(resolve_project_path "$1")
+                                if [[ -n "$resolved" ]]; then
+                                    projects_to_clean+=("$resolved")
+                                else
+                                    error "No ClaudeBox project found: $1"
+                                fi
+                                shift
+                                ;;
+                        esac
+                    done
+                    
+                    # Add unknown projects if requested
+                    if [[ "$clean_unknown" == "true" ]]; then
+                        if [[ -d "$HOME/.claudebox/projects" ]]; then
+                            for project_dir in "$HOME/.claudebox/projects"/*/; do
+                                [[ -d "$project_dir" ]] || continue
+                                local project_id=$(basename "$project_dir")
+                                local config_file="$project_dir/config.ini"
+                                local is_unknown=true
+                                
+                                if [[ -f "$config_file" ]]; then
+                                    local path_value=$(read_config_value "$config_file" "project" "path")
+                                    if [[ -n "$path_value" ]] && [[ "$path_value" != "(unknown)" ]]; then
+                                        is_unknown=false
+                                    fi
+                                fi
+                                
+                                if [[ "$is_unknown" == "true" ]]; then
+                                    projects_to_clean+=("$project_id")
+                                fi
+                            done
                         fi
-                    else
-                        project_folder_name=$(get_project_folder_name "$PROJECT_DIR")
                     fi
-
-                    local project_claudebox_dir="$HOME/.claudebox/projects/$project_folder_name"
-                    local image_name="claudebox-${project_folder_name}"
-
-                    local display_path="$PROJECT_DIR"
-                    local config_file="$project_claudebox_dir/config.ini"
-                    if [[ -f "$config_file" ]]; then
-                        local path_value=$(read_config_value "$config_file" "project" "path")
-                        [[ -n "$path_value" ]] && display_path="$path_value"
+                    
+                    # If no projects specified, use current directory
+                    if [[ ${#projects_to_clean[@]} -eq 0 ]] && [[ "$clean_unknown" != "true" ]]; then
+                        local current_project
+                        current_project=$(get_project_folder_name "$PROJECT_DIR")
+                        projects_to_clean+=("$current_project")
                     fi
-
-                    case "${1:-}" in
-                        profiles|tools)
-                            warn "Clearing profile configuration for: $display_path"
-                            if [[ -f "$config_file" ]]; then
-
-                                {
-                                    awk '/^\[profiles\]/ { profiles=1; print; print ""; next }
-                                         /^\[packages\]/ { packages=1; print; print ""; next }
-                                         /^\[/ { profiles=0; packages=0 }
-                                         !profiles && !packages { print }' "$config_file"
-                                } > "${config_file}.tmp" && mv "${config_file}.tmp" "$config_file"
-                                success "Cleared profile configuration"
-                            else
-                                info "No configuration file found"
-                            fi
-                            ;;
-                        data)
-                            warn "Removing project data for: $display_path"
-                            if [[ -d "$project_claudebox_dir" ]]; then
-                                rm -rf "$project_claudebox_dir"
-                                success "Removed project data folder: $project_claudebox_dir"
-                            else
-                                info "No project data folder found"
-                            fi
-                            ;;
-                        docker)
-                            warn "Removing Docker image for: $display_path"
-                            docker rmi -f "$image_name" 2>/dev/null && \
-                                success "Removed Docker image: $image_name" || \
-                                info "No Docker image found for this project"
-                            ;;
-                        all)
-                            warn "Removing all project artifacts for: $display_path"
-                            if [[ -f "$config_file" ]]; then
-                                rm -f "$config_file"
-                                success "Removed profile configuration"
-                            fi
-                            if [[ -d "$project_claudebox_dir" ]]; then
-                                rm -rf "$project_claudebox_dir"
-                                success "Removed project data folder"
-                            fi
-                            docker rmi -f "$image_name" 2>/dev/null && \
-                                success "Removed Docker image" || \
-                                info "No Docker image found"
-                            ;;
-                        *)
-                            cecho "ClaudeBox Project Clean Options:" "$CYAN"
+                    
+                    # If no action specified, show help
+                    if [[ -z "$action" ]]; then
+                        if [[ ${#projects_to_clean[@]} -gt 0 ]]; then
+                            # Show what would be cleaned
+                            cecho "Projects to clean:" "$YELLOW"
+                            for project_id in "${projects_to_clean[@]}"; do
+                                local display_path="(unknown)"
+                                local config_file="$HOME/.claudebox/projects/$project_id/config.ini"
+                                if [[ -f "$config_file" ]]; then
+                                    local path_value=$(read_config_value "$config_file" "project" "path")
+                                    [[ -n "$path_value" ]] && display_path="$path_value"
+                                fi
+                                echo "  - $display_path (${project_id##*_})"
+                            done
                             echo
-                            echo -e "  ${GREEN}clean project [path] profiles${NC}   Remove installed profiles & packages"
-                            echo -e "  ${GREEN}clean project [path] data${NC}       Remove project data (auth, history, configs)"
-                            echo -e "  ${GREEN}clean project [path] docker${NC}     Remove project Docker image"
-                            echo -e "  ${GREEN}clean project [path] all${NC}        Remove everything for this project"
-                            echo
-                            cecho "Usage examples:" "$WHITE"
-                            echo "  claudebox clean project data                      # Current directory"
-                            echo "  claudebox clean project /path/to/project all      # Specific path"
-                            echo
-                            cecho "Current project: $PROJECT_DIR" "$YELLOW"
-                            echo
-                            cecho "What gets removed:" "$WHITE"
-                            echo "  profiles: Clears [profiles] and [packages] sections in config.ini"
-                            echo "  data:     ~/.claudebox/projects/${project_folder_name}/ (entire project folder)"
-                            echo "  docker:   Docker image claudebox-${project_folder_name}"
-                            exit 0
-                            ;;
-                    esac
+                        fi
+                        
+                        cecho "ClaudeBox Project Clean Options:" "$CYAN"
+                        echo
+                        echo -e "  ${GREEN}clean project [path/hash...] profiles${NC}   Remove installed profiles & packages"
+                        echo -e "  ${GREEN}clean project [path/hash...] data${NC}       Remove project data (auth, history, configs)"
+                        echo -e "  ${GREEN}clean project [path/hash...] docker${NC}     Remove project Docker image"
+                        echo -e "  ${GREEN}clean project [path/hash...] all${NC}        Remove everything for projects"
+                        echo -e "  ${GREEN}clean project unknown all${NC}               Remove all unknown projects"
+                        echo
+                        echo -e "${YELLOW}Run 'claudebox clean examples' for usage examples${NC}"
+                        exit 0
+                    fi
+                    
+                    # Perform the clean action for each project
+                    for project_id in "${projects_to_clean[@]}"; do
+                        local project_claudebox_dir="$HOME/.claudebox/projects/$project_id"
+                        local image_name="claudebox-${project_id}"
+                        local display_path="(unknown)"
+                        local config_file="$project_claudebox_dir/config.ini"
+                        
+                        if [[ -f "$config_file" ]]; then
+                            local path_value=$(read_config_value "$config_file" "project" "path")
+                            [[ -n "$path_value" ]] && display_path="$path_value"
+                        fi
+                        
+                        case "$action" in
+                            profiles|tools)
+                                cecho "Clearing profile configuration for: $display_path" "$YELLOW"
+                                if [[ -f "$config_file" ]]; then
+                                    {
+                                        awk '/^\[profiles\]/ { profiles=1; print; print ""; next }
+                                             /^\[packages\]/ { packages=1; print; print ""; next }
+                                             /^\[/ { profiles=0; packages=0 }
+                                             !profiles && !packages { print }' "$config_file"
+                                    } > "${config_file}.tmp" && mv "${config_file}.tmp" "$config_file"
+                                    success "  ✓ Cleared profile configuration"
+                                else
+                                    info "  - No configuration file found"
+                                fi
+                                ;;
+                            data)
+                                cecho "Removing project data for: $display_path" "$YELLOW"
+                                if [[ -d "$project_claudebox_dir" ]]; then
+                                    rm -rf "$project_claudebox_dir"
+                                    success "  ✓ Removed project data folder"
+                                else
+                                    info "  - No project data folder found"
+                                fi
+                                ;;
+                            docker)
+                                cecho "Removing Docker image for: $display_path" "$YELLOW"
+                                if docker rmi -f "$image_name" 2>/dev/null; then
+                                    success "  ✓ Removed Docker image"
+                                else
+                                    info "  - No Docker image found"
+                                fi
+                                ;;
+                            all)
+                                cecho "Removing all artifacts for: $display_path" "$YELLOW"
+                                local cleaned_something=false
+                                
+                                # Remove config
+                                if [[ -f "$config_file" ]]; then
+                                    rm -f "$config_file"
+                                    success "  ✓ Removed profile configuration"
+                                    cleaned_something=true
+                                fi
+                                
+                                # Remove project folder and lock
+                                if [[ -d "$project_claudebox_dir" ]]; then
+                                    rm -rf "$project_claudebox_dir"
+                                    success "  ✓ Removed project data folder"
+                                    cleaned_something=true
+                                fi
+                                
+                                
+                                # Remove Docker image
+                                if docker rmi -f "$image_name" 2>/dev/null; then
+                                    success "  ✓ Removed Docker image"
+                                    cleaned_something=true
+                                fi
+                                
+                                if [[ "$cleaned_something" != "true" ]]; then
+                                    info "  - No artifacts found for this project"
+                                fi
+                                ;;
+                        esac
+                    done
                     exit 0
                     ;;
+                example|examples)
+                    cecho "ClaudeBox Clean Examples:" "$CYAN"
+                    echo
+                    cecho "🐳 Docker Cleanup:" "$WHITE"
+                    echo "  claudebox clean containers               # Remove all containers"
+                    echo "  claudebox clean image                    # Remove containers and image"
+                    echo "  claudebox clean all                      # Complete Docker cleanup"
+                    echo "  claudebox clean cache                    # Clear build cache only"
+                    echo
+                    cecho "📁 Project Cleanup:" "$WHITE"
+                    echo "  # Current project"
+                    echo "  claudebox clean project data             # Remove project data"
+                    echo "  claudebox clean project all              # Remove everything"
+                    echo
+                    echo "  # Specific projects"
+                    echo "  claudebox clean project /path/to/project all"
+                    echo "  claudebox clean project 11c26114 docker"
+                    echo
+                    echo "  # Multiple projects"
+                    echo "  claudebox clean project /foo /bar 11c26114 all"
+                    echo
+                    echo "  # All unknown projects"
+                    echo "  claudebox clean project unknown all"
+                    echo
+                    cecho "🧹 Maintenance:" "$WHITE"
+                    echo "  claudebox clean dangling                 # Remove dangling images"
+                    echo "  claudebox clean volumes                  # Remove Docker volumes"
+                    echo "  claudebox clean logs                     # Clear container logs"
+                    echo
+                    exit 0
+                    ;;
+                    
                 *)
                     cecho "ClaudeBox Clean Options:" "$CYAN"
                     echo
                     echo -e "  ${GREEN}clean containers${NC}         Remove all containers (preserves image)"
                     echo -e "  ${GREEN}clean project${NC}            Show project cleanup options"
-                    echo -e "  ${GREEN}clean all${NC}                Remove all Docker artifacts (containers, images, cache, volumes)"
-                    echo -e "  ${GREEN}clean image${NC}              Remove containers and image (preserves build cache)"
+                    echo -e "  ${GREEN}clean all${NC}                Remove all Docker artifacts"
+                    echo -e "  ${GREEN}clean image${NC}              Remove containers and image"
                     echo -e "  ${GREEN}clean cache${NC}              Remove Docker build cache only"
                     echo -e "  ${GREEN}clean volumes${NC}            Remove associated Docker volumes"
-                    echo -e "  ${GREEN}clean dangling${NC}           Remove dangling images and unused containers"
+                    echo -e "  ${GREEN}clean dangling${NC}           Remove dangling images"
                     echo -e "  ${GREEN}clean logs${NC}               Clear Docker container logs"
+                    echo -e "  ${GREEN}clean examples${NC}           Show usage examples"
                     echo
-                    cecho "Examples:" "$YELLOW"
-                    echo "  claudebox clean containers  # Remove all containers"
-                    echo "  claudebox clean project     # Show project cleanup menu"
-                    echo "  claudebox clean image       # Remove containers and image"
-                    echo "  claudebox clean all         # Complete Docker cleanup"
+                    echo -e "${YELLOW}Run 'claudebox clean examples' for usage examples${NC}"
                     exit 0
                     ;;
             esac
@@ -1651,6 +2680,124 @@ main() {
             fi
             
             success "✓ Restored claudebox from backup"
+            exit 0
+            ;;
+            
+        set)
+            shift
+            case "${1:-}" in
+                workspace)
+                    shift
+                    local workspace_file="$HOME/.claudebox/workpath"
+                    mkdir -p "$(dirname "$workspace_file")"
+                    
+                    if [[ -z "${1:-}" ]]; then
+                        # No argument - show current workspace
+                        if [[ -f "$workspace_file" ]]; then
+                            local current_workspace=$(cat "$workspace_file" 2>/dev/null || echo "")
+                            if [[ -n "$current_workspace" ]]; then
+                                cecho "Current workspace:" "$CYAN"
+                                echo "  $current_workspace"
+                            else
+                                warn "No workspace set"
+                            fi
+                        else
+                            warn "No workspace set"
+                        fi
+                    else
+                        # Set new workspace
+                        local new_workspace="$1"
+                        # Resolve to absolute path if it's a directory
+                        if [[ -d "$new_workspace" ]]; then
+                            new_workspace=$(cd "$new_workspace" && pwd)
+                        fi
+                        echo "$new_workspace" > "$workspace_file"
+                        success "Workspace set to: $new_workspace"
+                    fi
+                    exit 0
+                    ;;
+                *)
+                    cecho "ClaudeBox Set Commands:" "$CYAN"
+                    echo
+                    echo -e "  ${GREEN}set workspace [path]${NC}    Set or show workspace directory"
+                    echo
+                    echo "Examples:"
+                    echo "  claudebox set workspace           # Show current workspace"
+                    echo "  claudebox set workspace ~         # Set workspace to home"
+                    echo "  claudebox set workspace /projects # Set workspace to /projects"
+                    echo
+                    exit 0
+                    ;;
+            esac
+            ;;
+            
+        reset)
+            shift
+            if [[ -z "${1:-}" ]]; then
+                error "Please specify a project path or name"
+            fi
+            
+            local project_arg="$1"
+            local target_path=""
+            
+            # Check if it's an absolute path
+            if [[ "$project_arg" =~ ^/ ]]; then
+                target_path="$project_arg"
+            else
+                # Try workspace-relative
+                local workspace_file="$HOME/.claudebox/workpath"
+                if [[ -f "$workspace_file" ]]; then
+                    local workspace=$(cat "$workspace_file" 2>/dev/null || echo "")
+                    if [[ -n "$workspace" ]]; then
+                        target_path="$workspace/$project_arg"
+                    fi
+                fi
+            fi
+            
+            if [[ -z "$target_path" ]] || [[ ! -d "$target_path" ]]; then
+                error "Project not found: $project_arg"
+            fi
+            
+            # Find the parent slot for this project
+            local parent_found=false
+            for project_dir in "$HOME/.claudebox/projects"/*/ ; do
+                [[ -d "$project_dir" ]] || continue
+                local config_file="$project_dir/config.ini"
+                
+                if [[ -f "$config_file" ]]; then
+                    local path_value=$(read_config_value "$config_file" "project" "path")
+                    if [[ "$path_value" == "$target_path" ]]; then
+                        # Check if this is the parent (has iterations file)
+                        if [[ -f "$project_dir/.hashcount" ]]; then
+                            parent_found=true
+                            cecho "Resetting project: $target_path" "$YELLOW"
+                            
+                            # Touch the config file to trigger rebuild
+                            touch "$config_file"
+                            
+                            # Also remove any cached build hash to force rebuild
+                            local project_id=$(basename "$project_dir")
+                            local image_name="claudebox-${project_id}"
+                            
+                            # Remove the image to force rebuild
+                            if docker image inspect "$image_name" &>/dev/null; then
+                                docker rmi -f "$image_name" 2>/dev/null || true
+                                success "✓ Removed Docker image for rebuild"
+                            fi
+                            
+                            success "✓ Project reset - Docker will rebuild on next run"
+                            echo
+                            echo "All slots for this project will rebuild their Docker images on next launch."
+                            break
+                        fi
+                    fi
+                fi
+            done
+            
+            if [[ "$parent_found" != "true" ]]; then
+                error "Could not find project configuration for: $target_path"
+            fi
+            
             exit 0
             ;;
 
@@ -1853,8 +3000,11 @@ main() {
     # Ensure shared commands folder is set up
     setup_shared_commands
     
-    setup_project_folder
-    setup_claude_agent_command
+    # Only setup project folder if we're initializing or already initialized
+    if [[ "$found_init" == "true" ]] || check_if_initialized "$PROJECT_DIR"; then
+        setup_project_folder
+        setup_claude_agent_command
+    fi
 
     local need_rebuild=false
     local current_profiles=()
@@ -1872,12 +3022,12 @@ main() {
         current_profiles=("${cleaned_profiles[@]}")
 
         if [[ ${#current_profiles[@]} -gt 0 ]]; then
-            profile_hash=$(printf '%s\n' "${current_profiles[@]}" | sort | sha256sum | cut -d' ' -f1)
+            profile_hash=$(printf '%s\n' "${current_profiles[@]}" | sort | fnv1a_32)
         fi
     fi
 
     # Calculate hash of the script itself
-    local script_hash=$(sha256sum "$SCRIPT_PATH" | cut -d' ' -f1)
+    local script_hash=$(cat "$SCRIPT_PATH" | fnv1a_32)
     local build_hash="${script_hash}-${profile_hash}"
     
     # Check if build files have changed
@@ -2164,30 +3314,33 @@ DOCKERFILE
         mkdir -p "$HOME/.claudebox"
         echo "$build_hash" > "$last_build_hash_file"
 
-        echo
-        cecho "ClaudeBox Setup Complete!" "$CYAN"
-        echo
-        cecho "Quick Start:" "$GREEN"
-        echo -e "  ${YELLOW}claudebox [options]${NC}        # Launch Claude CLI"
-        echo
-        cecho "Power Features:" "$GREEN"
-        echo -e "  ${YELLOW}claudebox profiles${NC}               # See all available profiles"
-        echo -e "  ${YELLOW}claudebox profile c openwrt${NC}      # Install C + OpenWRT tools"
-        echo -e "  ${YELLOW}claudebox profile python ml${NC}      # Install Python + ML stack"
-        echo -e "  ${YELLOW}claudebox install <packages>${NC}     # Install additional apt packages"
-        echo -e "  ${YELLOW}claudebox shell${NC}                  # Open powerline shell in container"
-        echo -e "  ${YELLOW}claudebox allowlist${NC}              # View firewall configuration"
-        echo
-        cecho "Security:" "$GREEN"
-        echo -e "  Network firewall: ON by default (Anthropic recommended)"
-        echo -e "  Sudo access: OFF by default"
-        echo
-        cecho "Maintenance:" "$GREEN"
-        echo -e "  ${YELLOW}claudebox clean ${NC}                 # See all cleanup options"
-        echo -e "  ${YELLOW}claudebox unlink ${NC}                # Remove symbolic link"
-        echo
-        cecho "Just install the profile you need and start coding!" "$PURPLE"
-       exit 0
+        # Only show setup complete message if not running init
+        if [[ "$found_init" != "true" ]]; then
+            echo
+            cecho "ClaudeBox Setup Complete!" "$CYAN"
+            echo
+            cecho "Quick Start:" "$GREEN"
+            echo -e "  ${YELLOW}claudebox [options]${NC}        # Launch Claude CLI"
+            echo
+            cecho "Power Features:" "$GREEN"
+            echo -e "  ${YELLOW}claudebox profiles${NC}               # See all available profiles"
+            echo -e "  ${YELLOW}claudebox profile c openwrt${NC}      # Install C + OpenWRT tools"
+            echo -e "  ${YELLOW}claudebox profile python ml${NC}      # Install Python + ML stack"
+            echo -e "  ${YELLOW}claudebox install <packages>${NC}     # Install additional apt packages"
+            echo -e "  ${YELLOW}claudebox shell${NC}                  # Open powerline shell in container"
+            echo -e "  ${YELLOW}claudebox allowlist${NC}              # View firewall configuration"
+            echo
+            cecho "Security:" "$GREEN"
+            echo -e "  Network firewall: ON by default (Anthropic recommended)"
+            echo -e "  Sudo access: OFF by default"
+            echo
+            cecho "Maintenance:" "$GREEN"
+            echo -e "  ${YELLOW}claudebox clean ${NC}                 # See all cleanup options"
+            echo -e "  ${YELLOW}claudebox unlink ${NC}                # Remove symbolic link"
+            echo
+            cecho "Just install the profile you need and start coding!" "$PURPLE"
+            exit 0
+        fi
    fi
 
    # Run container
