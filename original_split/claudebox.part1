@@ -1,0 +1,901 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Configuration
+DEFAULT_FLAGS=()
+# readonly IMAGE_NAME="claudebox"  # Now computed per project
+readonly DOCKER_USER="claude"
+readonly USER_ID=$(id -u)
+readonly GROUP_ID=$(id -g)
+readonly PROJECT_DIR="$(pwd)"
+
+# ────────────────────────────────────────────────────────────────────────────────
+#  Cross-platform host detection (Linux vs. macOS) and FS case-sensitivity check
+# ────────────────────────────────────────────────────────────────────────────────
+OS_TYPE="$(uname -s)"
+case "$OS_TYPE" in
+  Darwin*) HOST_OS="macOS" ;;
+  Linux*)  HOST_OS="linux" ;;
+  *) echo "Unsupported operating system: $OS_TYPE" >&2; exit 1 ;;
+esac
+
+# Detect case‑insensitive default macOS filesystems (HFS+/APFS)
+# Exit code 0  → case‑sensitive, 1 → case‑insensitive
+is_case_sensitive_fs() {
+  local t1 t2
+  t1="$(mktemp "/tmp/.fs_case_test.XXXXXXXX")"
+  # More portable uppercase conversion
+  t2="$(echo "$t1" | tr '[:lower:]' '[:upper:]')"
+  touch "$t1"
+  [[ -e "$t2" && "$t1" != "$t2" ]] && { rm -f "$t1"; return 1; }
+  rm -f "$t1"
+  return 0
+}
+
+# Normalise docker‑build contexts on case‑insensitive hosts to avoid collisions
+if [[ "$HOST_OS" == "macOS" ]] && ! is_case_sensitive_fs; then
+  export COMPOSE_DOCKER_CLI_BUILD=1   # new BuildKit path‑normaliser
+  export DOCKER_BUILDKIT=1
+fi
+
+
+# Cross-platform script path resolution
+get_script_path() {
+    local source="${BASH_SOURCE[0]:-$0}"
+    while [[ -L "$source" ]]; do
+        local dir="$(cd -P "$(dirname "$source")" && pwd)"
+        source="$(readlink "$source")"
+        [[ $source != /* ]] && source="$dir/$source"
+    done
+    echo "$(cd -P "$(dirname "$source")" && pwd)/$(basename "$source")"
+}
+readonly SCRIPT_PATH="$(get_script_path)"
+
+readonly LINK_TARGET="$HOME/.local/bin/claudebox"
+readonly NODE_VERSION="--lts"
+readonly DELTA_VERSION="0.17.0"
+
+# Color codes
+readonly RED='\033[0;31m'
+readonly GREEN='\033[0;32m'
+readonly YELLOW='\033[1;33m'
+readonly BLUE='\033[0;34m'
+readonly PURPLE='\033[0;35m'
+readonly CYAN='\033[0;36m'
+readonly WHITE='\033[1;37m'
+readonly NC='\033[0m'
+
+# Utility functions
+cecho() { echo -e "${2:-$NC}$1${NC}"; }
+error() { cecho "$1" "$RED" >&2; exit "${2:-1}"; }
+warn() { cecho "$1" "$YELLOW"; }
+info() { cecho "$1" "$BLUE"; }
+success() { cecho "$1" "$GREEN"; }
+
+# Parse early flags
+VERBOSE=false
+
+for arg in "$@"; do   # SC2068 is fine – we want word–splitting on purpose here
+    case "$arg" in
+        --verbose) VERBOSE=true ; shift ;;
+    esac
+done
+
+# Load saved default flags if they exist
+if [[ -f "$HOME/.claudebox/default-flags" ]]; then
+    while IFS= read -r flag; do
+        [[ -n "$flag" ]] && DEFAULT_FLAGS+=("$flag")
+    done < "$HOME/.claudebox/default-flags"
+fi
+
+# Logo
+logo() {
+    local cb='
+ ██████╗██╗      █████╗ ██╗   ██╗██████╗ ███████╗
+██╔════╝██║     ██╔══██╗██║   ██║██╔══██╗██╔════╝
+██║     ██║     ███████║██║   ██║██║  ██║█████╗
+██║     ██║     ██╔══██║██║   ██║██║  ██║██╔══╝
+╚██████╗███████╗██║  ██║╚██████╔╝██████╔╝███████╗
+ ╚═════╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚══════╝
+
+██████╗  ██████╗ ██╗  ██╗ ------ ┌──────────────┐
+██╔══██╗██╔═══██╗╚██╗██╔╝ ------ │ The Ultimate │
+██████╔╝██║   ██║ ╚███╔╝  ------ │ Claude Code  │
+██╔══██╗██║   ██║ ██╔██╗  ------ │  Docker Dev  │
+██████╔╝╚██████╔╝██╔╝ ██╗ ------ │ Environment  │
+╚═════╝  ╚═════╝ ╚═╝  ╚═╝ ------ └──────────────┘
+'
+    while IFS= read -r l; do
+        o="" c=""
+        for ((i=0;i<${#l};i++)); do
+            ch="${l:$i:1}"
+            [[ "$ch" == " " ]] && { o+="$ch"; continue; }
+            cc=$(printf '%d' "'$ch" 2>/dev/null||echo 0)
+            if [[ $cc -ge 32 && $cc -le 126 ]]; then n='\033[33m'
+            elif [[ $cc -ge 9552 && $cc -le 9580 ]]; then n='\033[34m'
+            elif [[ $cc -eq 9608 ]]; then n='\033[31m'
+            else n='\033[37m'; fi
+            [[ "$n" != "$c" ]] && { o+="$n"; c="$n"; }
+            o+="$ch"
+        done
+        echo -e "${o}\033[0m"
+    done <<< "$cb"
+}
+
+update_symlink() {
+    # Ensure the directory exists
+    mkdir -p "$(dirname "$LINK_TARGET")"
+
+    # Check if symlink exists and points to the correct location
+    if [[ -L "$LINK_TARGET" ]]; then
+        local current_target
+        current_target=$(readlink "$LINK_TARGET" 2>/dev/null || echo "")
+        if [[ "$current_target" == "$SCRIPT_PATH" ]]; then
+            [[ "$VERBOSE" == "true" ]] && info "Symlink already correct: $LINK_TARGET → $SCRIPT_PATH"
+            return 0
+        else
+            # Remove incorrect symlink
+            rm -f "$LINK_TARGET"
+            [[ "$VERBOSE" == "true" ]] && info "Removing outdated symlink"
+        fi
+    elif [[ -e "$LINK_TARGET" ]]; then
+        # Something else exists at this path
+        error "Cannot create symlink: $LINK_TARGET already exists and is not a symlink"
+    fi
+
+    # Create new symlink
+    if ln -s "$SCRIPT_PATH" "$LINK_TARGET"; then
+        success "Symlink updated: $LINK_TARGET → $SCRIPT_PATH"
+    else
+        warn "Could not create symlink at $LINK_TARGET"
+        warn "Try running with sudo or ensure $(dirname "$LINK_TARGET") is writable"
+        warn "Error: $?"
+    fi
+}
+
+# Docker checks
+check_docker() {
+    command -v docker &>/dev/null || return 1
+    docker info &>/dev/null || return 2
+    docker ps &>/dev/null || return 3
+    return 0
+}
+
+install_docker() {
+    warn "Docker is not installed."
+    cecho "Would you like to install Docker now? (y/n)" "$CYAN"
+    read -r response
+    [[ "$response" =~ ^[Yy]$ ]] || error "Docker is required. Visit: https://docs.docker.com/engine/install/"
+
+    info "Installing Docker..."
+
+    [[ -f /etc/os-release ]] && . /etc/os-release || error "Cannot detect OS"
+
+    case "${ID:-}" in
+        ubuntu|debian)
+            warn "Installing Docker requires sudo privileges..."
+            sudo apt-get update
+            sudo apt-get install -y ca-certificates curl gnupg lsb-release
+            sudo mkdir -p /etc/apt/keyrings
+            curl -fsSL "https://download.docker.com/linux/$ID/gpg" | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/$ID $(lsb_release -cs) stable" | \
+                sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+            sudo apt-get update
+            sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+            ;;
+        fedora|rhel|centos)
+            warn "Installing Docker requires sudo privileges..."
+            sudo dnf -y install dnf-plugins-core
+            sudo dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
+            sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+            sudo systemctl start docker
+            sudo systemctl enable docker
+            ;;
+        arch|manjaro)
+            warn "Installing Docker requires sudo privileges..."
+            sudo pacman -S --noconfirm docker
+            sudo systemctl start docker
+            sudo systemctl enable docker
+            ;;
+        *)
+            error "Unsupported OS: ${ID:-unknown}. Visit: https://docs.docker.com/engine/install/"
+            ;;
+    esac
+
+    success "Docker installed successfully!"
+    configure_docker_nonroot
+}
+
+configure_docker_nonroot() {
+    warn "Configuring Docker for non-root usage..."
+    warn "This requires sudo to add you to the docker group..."
+
+    getent group docker >/dev/null || sudo groupadd docker
+    sudo usermod -aG docker "$USER"
+
+    success "Docker configured for non-root usage!"
+    warn "You need to log out and back in for group changes to take effect."
+    warn "Or run: ${CYAN}newgrp docker"
+    warn "Then run 'claudebox' again."
+    info "Trying to activate docker group in current shell..."
+    exec newgrp docker
+}
+
+# Spinner
+show_spinner() {
+    local pid=$1 msg=$2 spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏' i=0
+    echo -n "$msg "
+    while kill -0 "$pid" 2>/dev/null; do
+        printf "\b%s" "${spin:i++%${#spin}:1}"
+        sleep 0.1
+    done
+    echo -e "\b${GREEN}✓${NC}"
+}
+
+# Bash 3.2 compatible profile functions (no associative arrays)
+get_profile_packages() {
+    case "$1" in
+        core) echo "gcc g++ make git pkg-config libssl-dev libffi-dev zlib1g-dev tmux" ;;
+        build-tools) echo "cmake ninja-build autoconf automake libtool" ;;
+        shell) echo "rsync openssh-client man-db gnupg2 aggregate file" ;;
+        networking) echo "iptables ipset iproute2 dnsutils" ;;
+        c) echo "gdb valgrind clang clang-format clang-tidy cppcheck doxygen libboost-all-dev libcmocka-dev libcmocka0 lcov libncurses5-dev libncursesw5-dev" ;;
+        openwrt) echo "rsync libncurses5-dev zlib1g-dev gawk gettext xsltproc libelf-dev ccache subversion swig time qemu-system-arm qemu-system-aarch64 qemu-system-mips qemu-system-x86 qemu-utils" ;;
+        rust) echo "" ;;  # Rust installed via rustup
+        python) echo "" ;;  # Managed via uv
+        go) echo "" ;;  # Installed from tarball
+        javascript) echo "" ;;  # Installed via nvm
+        java) echo "openjdk-17-jdk maven gradle ant" ;;
+        ruby) echo "ruby-full ruby-dev libreadline-dev libyaml-dev libsqlite3-dev sqlite3 libxml2-dev libxslt1-dev libcurl4-openssl-dev software-properties-common" ;;
+        php) echo "php php-cli php-fpm php-mysql php-pgsql php-sqlite3 php-curl php-gd php-mbstring php-xml php-zip composer" ;;
+        database) echo "postgresql-client mysql-client sqlite3 redis-tools mongodb-clients" ;;
+        devops) echo "docker.io docker-compose kubectl helm terraform ansible awscli" ;;
+        web) echo "nginx apache2-utils httpie" ;;
+        embedded) echo "gcc-arm-none-eabi gdb-multiarch openocd picocom minicom screen platformio" ;;
+        datascience) echo "r-base" ;;
+        security) echo "nmap tcpdump wireshark-common netcat-openbsd john hashcat hydra" ;;
+        ml) echo "" ;;  # Just cmake needed, comes from build-tools now
+        *) echo "" ;;
+    esac
+}
+
+get_profile_description() {
+    case "$1" in
+        core) echo "Core Development Utilities (compilers, VCS, shell tools)" ;;
+        build-tools) echo "Build Tools (CMake, autotools, Ninja)" ;;
+        shell) echo "Optional Shell Tools (fzf, SSH, man, rsync, file)" ;;
+        networking) echo "Network Tools (IP stack, DNS, route tools)" ;;
+        c) echo "C/C++ Development (debuggers, analyzers, Boost, ncurses, cmocka)" ;;
+        openwrt) echo "OpenWRT Development (cross toolchain, QEMU, distro tools)" ;;
+        rust) echo "Rust Development (installed via rustup)" ;;
+        python) echo "Python Development (managed via uv)" ;;
+        go) echo "Go Development (installed from upstream archive)" ;;
+        javascript) echo "JavaScript/TypeScript (Node installed via nvm)" ;;
+        java) echo "Java Development (OpenJDK 17, Maven, Gradle, Ant)" ;;
+        ruby) echo "Ruby Development (gems, native deps, XML/YAML)" ;;
+        php) echo "PHP Development (PHP + extensions + Composer)" ;;
+        database) echo "Database Tools (clients for major databases)" ;;
+        devops) echo "DevOps Tools (Docker, Kubernetes, Terraform, etc.)" ;;
+        web) echo "Web Dev Tools (nginx, HTTP test clients)" ;;
+        embedded) echo "Embedded Dev (ARM toolchain, serial debuggers)" ;;
+        datascience) echo "Data Science (Python, Jupyter, R)" ;;
+        security) echo "Security Tools (scanners, crackers, packet tools)" ;;
+        ml) echo "Machine Learning (build layer only; Python via uv)" ;;
+        *) echo "" ;;
+    esac
+}
+
+get_all_profile_names() {
+    echo "core build-tools shell networking c openwrt rust python go javascript java ruby php database devops web embedded datascience security ml"
+}
+
+profile_exists() {
+    local profile="$1"
+    for p in $(get_all_profile_names); do
+        [[ "$p" == "$profile" ]] && return 0
+    done
+    return 1
+}
+
+expand_profile() {
+    case "$1" in
+        c) echo "core build-tools c" ;;
+        openwrt) echo "core build-tools openwrt" ;;
+        ml) echo "core build-tools ml" ;;
+        rust|go|python|php|ruby|java|database|devops|web|embedded|datascience|security|javascript)
+            echo "core $1"
+            ;;
+        shell|networking|build-tools|core)
+            echo "$1"
+            ;;
+        *)
+            echo "$1"
+            ;;
+    esac
+}
+
+docker_exec_root() {
+    docker exec -u root "$@"
+}
+
+docker_exec_user() {
+    docker exec -u "$DOCKER_USER" "$@"
+}
+
+# Standardized container run function - ensures consistent mounts and environment
+run_claudebox_container() {
+    local container_name="$1"
+    local run_mode="$2"  # "interactive", "detached", "pipe", or "attached"
+    shift 2
+    local container_args=("$@")
+    
+    # Handle "attached" mode - start detached, wait, then attach
+    if [[ "$run_mode" == "attached" ]]; then
+        # Start detached
+        run_claudebox_container "$container_name" "detached" "${container_args[@]}" >/dev/null
+        
+        # Show progress while container initializes
+        fillbar
+        
+        # Wait for container to be ready
+        while ! docker exec "$container_name" true 2>/dev/null; do
+            sleep 0.1
+        done
+        
+        fillbar stop
+        
+        # Attach to ready container
+        docker attach "$container_name"
+        
+        return
+    fi
+    
+    local docker_args=()
+    
+    # Set run mode
+    case "$run_mode" in
+        "interactive")
+            # Only use -it if we have a TTY
+            if [ -t 0 ] && [ -t 1 ]; then
+                docker_args+=("-it")
+            fi
+            # Only add --rm if no container name (for persistence)
+            if [[ -z "$container_name" ]]; then
+                docker_args+=("--rm")
+            else
+                docker_args+=("--name" "$container_name")
+            fi
+            docker_args+=("--init")
+            ;;
+        "detached")
+            docker_args+=("-d")
+            if [[ -n "$container_name" ]]; then
+                docker_args+=("--name" "$container_name")
+            fi
+            ;;
+        "pipe")
+            docker_args+=("--rm" "--init")
+            ;;
+    esac
+    
+    # Standard configuration for ALL containers
+    docker_args+=(
+        -w /workspace
+        -v "$PROJECT_DIR":/workspace
+        -v "$PROJECT_CLAUDEBOX_DIR/.claude":/home/$DOCKER_USER/.claude
+        -v "$PROJECT_CLAUDEBOX_DIR/.claude.json":/home/$DOCKER_USER/.claude.json
+        -v "$PROJECT_CLAUDEBOX_DIR/.config":/home/$DOCKER_USER/.config
+        -v "$PROJECT_CLAUDEBOX_DIR/.cache":/home/$DOCKER_USER/.cache
+        -v "$HOME/.ssh":"/home/$DOCKER_USER/.ssh:ro"
+        -e "NODE_ENV=${NODE_ENV:-production}"
+        -e "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}"
+        -e "CLAUDEBOX_PROJECT_NAME=$project_folder_name"
+        -e "TERM=${TERM:-xterm-256color}"
+        --cap-add NET_ADMIN
+        --cap-add NET_RAW
+        "$IMAGE_NAME"
+    )
+    
+    # Add any additional arguments
+    if [[ ${#container_args[@]} -gt 0 ]]; then
+        docker_args+=("${container_args[@]}")
+    fi
+    
+    docker run "${docker_args[@]}"
+}
+
+check_container_exists() {
+    local container_name="$1"
+    
+    # Check if container exists (running or stopped)
+    if docker ps -a --filter "name=^${container_name}$" --format "{{.Names}}" 2>/dev/null | grep -q "^${container_name}$"; then
+        # Check if it's running
+        if docker ps --filter "name=^${container_name}$" --format "{{.Names}}" 2>/dev/null | grep -q "^${container_name}$"; then
+            echo "running"
+        else
+            echo "stopped"
+        fi
+    else
+        echo "none"
+    fi
+}
+
+FILLBAR_PID=""
+
+fillbar() {
+    case "${1:-}" in
+        stop)
+            if [ ! -z "$FILLBAR_PID" ]; then
+                kill $FILLBAR_PID 2>/dev/null
+            fi
+            printf "\r\033[K"
+            tput cnorm
+            FILLBAR_PID=""
+            ;;
+        *)
+            (
+                p=0
+                tput civis
+                while true; do
+                    printf "\r"
+                    full=$((p / 8))
+                    part=$((p % 8))
+                    i=0
+                    while [ $i -lt $full ]; do
+                        printf "█"
+                        i=$((i + 1))
+                    done
+                    if [ $part -gt 0 ]; then
+                        pb=$(printf %x $((0x258F - part + 1)))
+                        printf "\\u$pb"
+                    fi
+                    p=$((p + 1))
+                    sleep 0.01
+                done
+            ) &
+            FILLBAR_PID=$!
+            ;;
+    esac
+}
+
+show_help() {
+    if docker image inspect "$IMAGE_NAME" &>/dev/null; then
+        run_claudebox_container "" "pipe" --help | sed '1s/claude/claudebox/g'
+        echo
+        cecho "Added Options:" "$WHITE"
+        echo -e "${CYAN}  --verbose                       ${WHITE}Show detailed output"
+        echo -e "${CYAN}  --enable-sudo                   ${WHITE}Enable sudo without password"
+        echo -e "${CYAN}  --disable-firewall              ${WHITE}Disable network restrictions"
+        echo
+        cecho "Added Commands:" "$WHITE"
+        echo -e "  profiles                        List all available profiles"
+        echo -e "  projects                        List all projects with paths"
+        echo -e "  profile                         Profile management menu"
+        echo -e "  install <packages>              Install apt packages"
+        echo -e "  save [flags...]                 Save default flags (no args = clear saved flags)"
+        echo -e "  shell                           Open transient shell (changes NOT saved)"
+        echo -e "  shell admin                     Open admin shell (sudo, no firewall, changes saved)"
+        echo -e "  allowlist                       Show/edit firewall allowlist"
+        echo -e "  info                            Show comprehensive project info"
+        echo -e "  clean                           Menu of cleanup tasks"
+        echo -e "  unlink                          Remove claudebox symlink"
+        echo -e "  rebuild                         Rebuild the Docker image from scratch${NC}"
+    else
+        cecho "ClaudeBox - Claude Code Docker Environment" "$CYAN"
+        echo
+        warn "First run setup required!"
+        echo "Run script without arguments first to build the Docker image."
+    fi
+}
+
+get_project_folder_name() {
+    local clean_name=$(echo "$1" | sed 's|^/||; s|[^a-zA-Z0-9]|_|g; s|_+|_|g; s|^_||; s|_$||' | tr '[:upper:]' '[:lower:]')
+    local hash=$(echo -n "$1" | sha256sum | cut -c1-6)
+    echo "${clean_name}_${hash}"
+}
+
+get_profile_file_path() {
+    local project_id=$(get_project_folder_name "$PROJECT_DIR")
+    local project_dir="$HOME/.claudebox/projects/$project_id"
+    mkdir -p "$project_dir"
+    echo "$project_dir/config.ini"
+}
+
+read_config_value() {
+    local config_file="$1"
+    local section="$2"
+    local key="$3"
+
+    [[ -f "$config_file" ]] || return 1
+
+    awk -F ' *= *' -v section="[$section]" -v key="$key" '
+        $0 == section { in_section=1; next }
+        /^\[/ { in_section=0 }
+        in_section && $1 == key { print $2; exit }
+    ' "$config_file"
+}
+
+get_project_by_path() {
+    local search_path="$1"
+    local abs_path=$(realpath "$search_path" 2>/dev/null || echo "$search_path")
+    for project_dir in "$HOME/.claudebox/projects"/*/ ; do
+        [[ -d "$project_dir" ]] || continue
+        local config_file="$project_dir/config.ini"
+        [[ -f "$config_file" ]] || continue
+        local stored_path=$(read_config_value "$config_file" "project" "path")
+        if [[ "$stored_path" == "$abs_path" ]]; then
+            basename "$project_dir"
+            return 0
+        fi
+    done
+    return 1
+}
+
+list_all_projects() {
+    local projects_found=0
+    # shellcheck disable=SC2231 # We want pathname expansion even when no dirs
+    for project_dir in "$HOME/.claudebox/projects"/*/ ; do
+        [[ -d "$project_dir" ]] || continue
+        projects_found=1
+        local project_id=$(basename "$project_dir")
+        local original_path="(unknown)"
+        local image_status="❌"
+        local image_size="-"
+        local config_file="$project_dir/config.ini"
+        if [[ -f "$config_file" ]]; then
+            local path_value=$(read_config_value "$config_file" "project" "path")
+            [[ -n "$path_value" ]] && original_path="$path_value"
+        fi
+        local image_name="claudebox-${project_id}"
+        if docker image inspect "$image_name" &>/dev/null; then
+            image_status="✅"
+            image_size=$(docker images --filter "reference=$image_name" --format "{{.Size}}")
+        fi
+        printf "%10s  %s  %s\n" "$image_size" "$image_status" "$original_path"
+    done
+    [[ $projects_found -eq 0 ]] && return 1
+    return 0
+}
+
+resolve_project_path() {
+    local input_path="${1:-$PWD}"
+
+    if [[ "$input_path" =~ _[a-f0-9]{6}$ ]] && [[ -d "$HOME/.claudebox/$input_path" ]]; then
+        echo "$input_path"
+        return 0
+    fi
+
+    local project_id=$(get_project_by_path "$input_path")
+    if [[ -n "$project_id" ]]; then
+        echo "$project_id"
+        return 0
+    fi
+
+    return 1
+}
+
+read_profile_section() {
+    local profile_file="$1"
+    local section="$2"
+    local result=()
+
+    if [[ -f "$profile_file" ]] && grep -q "^\[$section\]" "$profile_file"; then
+        while IFS= read -r line; do
+            [[ -z "$line" || "$line" =~ ^\[.*\]$ ]] && break
+            result+=("$line")
+        done < <(sed -n "/^\[$section\]/,/^\[/p" "$profile_file" | tail -n +2 | grep -v '^\[')
+    fi
+
+    printf '%s\n' "${result[@]}"
+}
+
+update_profile_section() {
+    local profile_file="$1"
+    local section="$2"
+    shift 2
+    local new_items=("$@")
+
+    local existing_items=()
+    readarray -t existing_items < <(read_profile_section "$profile_file" "$section")
+
+    local all_items=()
+    for item in "${existing_items[@]}"; do
+        [[ -n "$item" ]] && all_items+=("$item")
+    done
+
+    for item in "${new_items[@]}"; do
+        local found=false
+        for existing in "${all_items[@]}"; do
+            [[ "$existing" == "$item" ]] && found=true && break
+        done
+        [[ "$found" == "false" ]] && all_items+=("$item")
+    done
+
+    {
+        if [[ -f "$profile_file" ]]; then
+            awk -v sect="$section" '
+                BEGIN { in_section=0; skip_section=0 }
+                /^\[/ {
+                    if ($0 == "[" sect "]") { skip_section=1; in_section=1 }
+                    else { skip_section=0; in_section=0 }
+                }
+                !skip_section { print }
+                /^\[/ && !skip_section && in_section { in_section=0 }
+            ' "$profile_file"
+        fi
+
+        echo "[$section]"
+        for item in "${all_items[@]}"; do
+            echo "$item"
+        done
+        echo ""
+    } > "${profile_file}.tmp" && mv "${profile_file}.tmp" "$profile_file"
+}
+
+setup_project_folder() {
+    mkdir -p "$PROJECT_CLAUDEBOX_DIR/.claude"
+    mkdir -p "$PROJECT_CLAUDEBOX_DIR/.config"
+    mkdir -p "$PROJECT_CLAUDEBOX_DIR/.cache"
+    if [[ ! -f "$PROJECT_CLAUDEBOX_DIR/.claude.json" ]]; then
+        echo '{}' > "$PROJECT_CLAUDEBOX_DIR/.claude.json"
+    fi
+
+    local config_file="$PROJECT_CLAUDEBOX_DIR/config.ini"
+    if [[ ! -f "$config_file" ]]; then
+        cat > "$config_file" <<EOF
+[project]
+path = $PROJECT_DIR
+
+[profiles]
+
+[packages]
+EOF
+    fi
+}
+
+
+# Ensure shared commands folder exists and is up to date
+setup_shared_commands() {
+    local shared_commands="$HOME/.claudebox/commands"
+    local script_dir="$(dirname "$SCRIPT_PATH")"
+    local commands_source="$script_dir/commands"
+    
+    # Create shared commands directory if it doesn't exist
+    mkdir -p "$shared_commands"
+    
+    # Copy/update commands from script directory if it exists
+    if [[ -d "$commands_source" ]]; then
+        # Copy new or updated files (preserve existing user files)
+        cp -n "$commands_source/"* "$shared_commands/" 2>/dev/null || true
+        
+        # For existing files, only update if source is newer
+        for file in "$commands_source"/*; do
+            if [[ -f "$file" ]]; then
+                local basename=$(basename "$file")
+                local dest_file="$shared_commands/$basename"
+                if [[ -f "$dest_file" ]] && [[ "$file" -nt "$dest_file" ]]; then
+                    cp "$file" "$dest_file"
+                    if [[ "$VERBOSE" == "true" ]]; then
+                        info "Updated command: $basename"
+                    fi
+                fi
+            fi
+        done
+        
+        if [[ "$VERBOSE" == "true" ]]; then
+            info "Synchronized commands to shared folder: $shared_commands"
+        fi
+    fi
+}
+
+setup_claude_agent_command() {
+    # Create commands symlink in project's .claude folder (mounts to ~/.claude in container)
+    local shared_commands="$HOME/.claudebox/commands"
+    local commands_dest="$PROJECT_CLAUDEBOX_DIR/.claude/commands"
+    
+    # Only create symlink if commands destination doesn't already exist
+    if [[ ! -e "$commands_dest" ]]; then
+        # Ensure parent directory exists
+        mkdir -p "$PROJECT_CLAUDEBOX_DIR/.claude"
+        
+        # Create symlink to shared commands
+        ln -s "$shared_commands" "$commands_dest"
+        
+        if [[ "$VERBOSE" == "true" ]]; then
+            info "Linked shared commands to project"
+        fi
+    fi
+}
+create_build_files() {
+    local build_context="$1"
+
+    cat > "$build_context/init-firewall" << 'EOF'
+#!/bin/bash
+set -euo pipefail
+if [ "${DISABLE_FIREWALL:-false}" = "true" ]; then
+    echo "Firewall disabled, skipping setup"
+    rm -f "$0"
+    exit 0
+fi
+iptables -F OUTPUT 2>/dev/null || true
+iptables -F INPUT 2>/dev/null || true
+iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
+iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT
+iptables -A INPUT -p udp --sport 53 -j ACCEPT
+iptables -A OUTPUT -o lo -j ACCEPT
+iptables -A INPUT -i lo -j ACCEPT
+iptables -A OUTPUT -s 127.0.0.0/8 -d 127.0.0.0/8 -j ACCEPT
+iptables -A INPUT -s 127.0.0.0/8 -d 127.0.0.0/8 -j ACCEPT
+iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+# Default allowed domains
+DEFAULT_DOMAINS="api.anthropic.com console.anthropic.com statsig.anthropic.com sentry.io"
+
+ALLOWED_DOMAINS="$DEFAULT_DOMAINS"
+ALLOWLIST_FILE="/home/DOCKERUSER/.claudebox/projects/${CLAUDEBOX_PROJECT_NAME:-}/allowlist"
+if [ -f "$ALLOWLIST_FILE" ]; then
+    while IFS= read -r line; do
+        [[ "$line" =~ ^#.* ]] && continue
+        [[ -z "$line" ]] && continue
+        domain="${line#\*.}"
+        domain="$(echo "$domain" | xargs)"
+        [[ -n "$domain" ]] && ALLOWED_DOMAINS="$ALLOWED_DOMAINS $domain"
+    done < "$ALLOWLIST_FILE"
+fi
+
+if command -v ipset >/dev/null 2>&1; then
+    ipset destroy allowed-domains 2>/dev/null || true
+    ipset create allowed-domains hash:net
+    ipset destroy allowed-ips 2>/dev/null || true
+    ipset create allowed-ips hash:net
+
+    for domain in $ALLOWED_DOMAINS; do
+        if [[ "$domain" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$ ]]; then
+            ipset add allowed-ips $domain 2>/dev/null || true
+        else
+            ips=$(getent hosts $domain 2>/dev/null | awk '{print $1}')
+            for ip in $ips; do
+                ipset add allowed-domains $ip 2>/dev/null || true
+            done
+        fi
+    done
+    iptables -A OUTPUT -m set --match-set allowed-domains dst -j ACCEPT
+    iptables -A OUTPUT -m set --match-set allowed-ips dst -j ACCEPT
+else
+    for domain in $ALLOWED_DOMAINS; do
+        if [[ "$domain" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$ ]]; then
+            iptables -A OUTPUT -d $domain -j ACCEPT
+        else
+            ips=$(getent hosts $domain 2>/dev/null | awk '{print $1}')
+            for ip in $ips; do
+                iptables -A OUTPUT -d $ip -j ACCEPT
+            done
+        fi
+    done
+fi
+iptables -P OUTPUT DROP
+iptables -P INPUT DROP
+echo "Firewall initialized with Anthropic-only access"
+rm -f "$(realpath "$0")"
+EOF
+
+    cat > "$build_context/docker-entrypoint.sh" << 'EOF'
+#!/bin/bash
+set -euo pipefail
+ENABLE_SUDO=false
+DISABLE_FIREWALL=false
+SHELL_MODE=false
+new_args=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --enable-sudo) ENABLE_SUDO=true; shift ;;
+        --disable-firewall) DISABLE_FIREWALL=true; shift ;;
+        --shell-mode) SHELL_MODE=true; shift ;;
+        *) new_args+=("$1"); shift ;;
+    esac
+done
+set -- "${new_args[@]}"
+export DISABLE_FIREWALL
+
+if [ -f ~/init-firewall ]; then
+    ~/init-firewall || true
+fi
+
+# Handle sudo access based on --enable-sudo flag
+# Note: claude user already has sudoers entry from Dockerfile
+if [ "$ENABLE_SUDO" != "true" ]; then
+    # Remove sudo access if --enable-sudo wasn't passed
+    rm -f /etc/sudoers.d/claude
+fi
+
+if [ -n "$CLAUDEBOX_PROJECT_NAME" ]; then
+    CONFIG_FILE="/home/DOCKERUSER/.claudebox/projects/${CLAUDEBOX_PROJECT_NAME}/config.ini"
+
+    if command -v uv >/dev/null 2>&1 && [ -f "$CONFIG_FILE" ] && grep -qE 'python|ml|datascience' "$CONFIG_FILE"; then
+        if [ ! -d /home/DOCKERUSER/.claudebox/projects/$CLAUDEBOX_PROJECT_NAME/.venv ]; then
+            su - DOCKERUSER -c "uv venv /home/DOCKERUSER/.claudebox/projects/$CLAUDEBOX_PROJECT_NAME/.venv"
+            if [ -f /workspace/pyproject.toml ]; then
+                su - DOCKERUSER -c "cd /workspace && uv sync"
+            else
+                su - DOCKERUSER -c "uv pip install --python /home/DOCKERUSER/.claudebox/projects/$CLAUDEBOX_PROJECT_NAME/.venv/bin/python ipython black pylint mypy flake8 pytest ruff"
+            fi
+        fi
+
+        for shell_rc in /home/DOCKERUSER/.zshrc /home/DOCKERUSER/.bashrc; do
+            if ! grep -q "source /home/DOCKERUSER/.claudebox/projects/$CLAUDEBOX_PROJECT_NAME/.venv/bin/activate" "$shell_rc"; then
+                echo 'if [ -f /home/DOCKERUSER/.claudebox/projects/$CLAUDEBOX_PROJECT_NAME/.venv/bin/activate ]; then source /home/DOCKERUSER/.claudebox/projects/$CLAUDEBOX_PROJECT_NAME/.venv/bin/activate; fi' >> "$shell_rc"
+            fi
+        done
+    fi
+fi
+
+cd /home/DOCKERUSER
+
+if [[ "${SHELL_MODE:-false}" == "true" ]]; then
+    # Use runuser to avoid PTY signal handling issues
+    exec runuser -u DOCKERUSER -- bash -c "source /home/DOCKERUSER/.nvm/nvm.sh && cd /workspace && exec /bin/zsh"
+else
+    # Claude mode - handle wrapper logic directly here
+    if [[ "${1:-}" == "update" ]]; then
+        # Special update handling - pass all arguments
+        shift  # Remove "update" from arguments
+        exec runuser -u DOCKERUSER -- bash -c '
+            export NVM_DIR="$HOME/.nvm"
+            if [[ -s "$NVM_DIR/nvm.sh" ]]; then
+                \. "$NVM_DIR/nvm.sh"
+                nvm use default >/dev/null 2>&1 || {
+                    echo "Warning: Failed to activate default Node version" >&2
+                }
+            else
+                echo "Warning: NVM not found at $NVM_DIR" >&2
+            fi
+            
+            cd /workspace
+            echo "Running update command..."
+            
+            # Check for stale update lock (older than 5 minutes)
+            lock_file="$HOME/.claude/.update.lock"
+            if [[ -f "$lock_file" ]]; then
+                lock_age=$(( $(date +%s) - $(stat -f %m "$lock_file" 2>/dev/null || stat -c %Y "$lock_file" 2>/dev/null || echo 0) ))
+                if [[ $lock_age -gt 300 ]]; then
+                    rm -f "$lock_file"
+                fi
+            fi
+            
+            # Capture the output of claude update to check if already up to date
+            update_output=$(claude update 2>&1)
+            echo "$update_output"
+            
+            # Only run version check if an actual update occurred
+            if echo "$update_output" | grep -q "Successfully updated\|Installing update"; then
+                echo "Verifying update..."
+                claude --version
+            fi
+        '
+    else
+        # Regular claude execution
+        exec runuser -u DOCKERUSER -- bash -c '
+            export NVM_DIR="$HOME/.nvm"
+            if [[ -s "$NVM_DIR/nvm.sh" ]]; then
+                \. "$NVM_DIR/nvm.sh"
+                nvm use default >/dev/null 2>&1 || {
+                    echo "Warning: Failed to activate default Node version" >&2
+                }
+            else
+                echo "Warning: NVM not found at $NVM_DIR" >&2
+            fi
+            
+            cd /workspace
+            
+            # If no arguments and stdin is a terminal, run claude in interactive mode
+            if [[ $# -eq 0 ]] && [[ -t 0 ]]; then
+                exec claude
+            else
+                exec claude "$@"
+            fi
+        ' -- "$@"
+    fi
+fi
+EOF
+}
+

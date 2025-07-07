@@ -1,0 +1,67 @@
+#!/bin/bash
+set -euo pipefail
+if [ "${DISABLE_FIREWALL:-false}" = "true" ]; then
+    echo "Firewall disabled, skipping setup"
+    rm -f "$0"
+    exit 0
+fi
+iptables -F OUTPUT 2>/dev/null || true
+iptables -F INPUT 2>/dev/null || true
+iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
+iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT
+iptables -A INPUT -p udp --sport 53 -j ACCEPT
+iptables -A OUTPUT -o lo -j ACCEPT
+iptables -A INPUT -i lo -j ACCEPT
+iptables -A OUTPUT -s 127.0.0.0/8 -d 127.0.0.0/8 -j ACCEPT
+iptables -A INPUT -s 127.0.0.0/8 -d 127.0.0.0/8 -j ACCEPT
+iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+# Default allowed domains
+DEFAULT_DOMAINS="api.anthropic.com console.anthropic.com statsig.anthropic.com sentry.io"
+
+ALLOWED_DOMAINS="$DEFAULT_DOMAINS"
+ALLOWLIST_FILE="/home/claude/.claudebox/projects/${CLAUDEBOX_PROJECT_NAME:-}/allowlist"
+if [ -f "$ALLOWLIST_FILE" ]; then
+    while IFS= read -r line; do
+        [[ "$line" =~ ^#.* ]] && continue
+        [[ -z "$line" ]] && continue
+        domain="${line#\*.}"
+        domain="$(echo "$domain" | xargs)"
+        [[ -n "$domain" ]] && ALLOWED_DOMAINS="$ALLOWED_DOMAINS $domain"
+    done < "$ALLOWLIST_FILE"
+fi
+
+if command -v ipset >/dev/null 2>&1; then
+    ipset destroy allowed-domains 2>/dev/null || true
+    ipset create allowed-domains hash:net
+    ipset destroy allowed-ips 2>/dev/null || true
+    ipset create allowed-ips hash:net
+
+    for domain in $ALLOWED_DOMAINS; do
+        if [[ "$domain" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$ ]]; then
+            ipset add allowed-ips $domain 2>/dev/null || true
+        else
+            ips=$(getent hosts $domain 2>/dev/null | awk '{print $1}')
+            for ip in $ips; do
+                ipset add allowed-domains $ip 2>/dev/null || true
+            done
+        fi
+    done
+    iptables -A OUTPUT -m set --match-set allowed-domains dst -j ACCEPT
+    iptables -A OUTPUT -m set --match-set allowed-ips dst -j ACCEPT
+else
+    for domain in $ALLOWED_DOMAINS; do
+        if [[ "$domain" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$ ]]; then
+            iptables -A OUTPUT -d $domain -j ACCEPT
+        else
+            ips=$(getent hosts $domain 2>/dev/null | awk '{print $1}')
+            for ip in $ips; do
+                iptables -A OUTPUT -d $ip -j ACCEPT
+            done
+        fi
+    done
+fi
+iptables -P OUTPUT DROP
+iptables -P INPUT DROP
+echo "Firewall initialized with Anthropic-only access"
+rm -f "$(realpath "$0")"
