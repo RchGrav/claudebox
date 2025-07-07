@@ -23,7 +23,9 @@ show_help() {
         echo -e "  info                            Show comprehensive project info"
         echo -e "  clean                           Menu of cleanup tasks"
         echo -e "  unlink                          Remove claudebox symlink"
-        echo -e "  rebuild                         Rebuild the Docker image from scratch${NC}"
+        echo -e "  rebuild                         Rebuild the Docker image from scratch"
+        echo -e "  create                          Create new authenticated container slot"
+        echo -e "  slots                           List all container slots for this project${NC}"
     else
         cecho "ClaudeBox - Claude Code Docker Environment" "$CYAN"
         echo
@@ -49,6 +51,8 @@ dispatch_command() {
     unlink)           _cmd_unlink "$@" ;;
     rebuild)          _cmd_rebuild "$@" ;;
     update)           _cmd_update "$@" ;;
+    create)           _cmd_create "$@" ;;
+    slots)            _cmd_slots "$@" ;;
     config|mcp|migrate-installer) _cmd_special "$cmd" "$@" ;;
     undo)             _cmd_undo "$@" ;;
     redo)             _cmd_redo "$@" ;;
@@ -755,8 +759,8 @@ _cmd_update() {
             fi
             
             # Compare hashes of the INSTALLED file
-            current_hash=$(_sha256 "$installed_path" 2>/dev/null | cut -d" " -f1 || echo "none")
-            new_hash=$(_sha256 /tmp/claudebox.new | cut -d" " -f1)
+            current_hash=$(crc32_file "$installed_path" || echo "none")
+            new_hash=$(crc32_file /tmp/claudebox.new)
             
             if [[ "$current_hash" != "$new_hash" ]]; then
                 info "New version available, updating..."
@@ -910,6 +914,62 @@ _cmd_redo() {
     fi
     
     success "✓ Restored claudebox from backup"
+    exit 0
+}
+
+_cmd_create() {
+    cecho "Creating new authenticated container slot..." "$CYAN"
+    echo
+    
+    # Create a new slot
+    local slot_name=$(create_container "$PROJECT_DIR")
+    local parent_dir=$(get_parent_dir "$PROJECT_DIR")
+    local slot_dir="$parent_dir/$slot_name"
+    
+    info "Created slot: $slot_name"
+    
+    # Build Docker image if needed
+    local image_name="claudebox-$(get_project_folder_name "$PROJECT_DIR")"
+    if ! docker image inspect "$image_name" &>/dev/null; then
+        warn "Docker image not found. Building..."
+        # The main script will handle the build
+        exit 2
+    fi
+    
+    # Launch OAuth wizard in the container
+    info "Launching authentication wizard..."
+    echo
+    cecho "Please follow these steps:" "$YELLOW"
+    echo "1. Copy the URL that appears"
+    echo "2. Open it in your browser"
+    echo "3. Authenticate with Claude"
+    echo "4. Copy the token and paste it back here"
+    echo
+    
+    # Run container with slot directory mounted
+    local container_name="claudebox-auth-$(date +%s)"
+    docker run -it --rm \
+        --name "$container_name" \
+        -v "$slot_dir":/home/$DOCKER_USER/.claudebox \
+        -v "$PROJECT_DIR":/workspace \
+        -w /workspace \
+        "$image_name" \
+        claude login
+    
+    # Check if authentication succeeded
+    if [[ -d "$slot_dir/.claude" ]]; then
+        success "✓ Slot $slot_name authenticated successfully!"
+        echo
+        info "You can now use this slot by running: claudebox"
+    else
+        error "Authentication failed. The slot was created but not authenticated."
+    fi
+    
+    exit 0
+}
+
+_cmd_slots() {
+    list_project_slots "$PROJECT_DIR"
     exit 0
 }
 

@@ -91,7 +91,13 @@ main() {
     # Set up project variables early - needed by multiple sections
     project_folder_name=$(get_project_folder_name "$PROJECT_DIR")
     IMAGE_NAME="claudebox-${project_folder_name}"
-    PROJECT_CLAUDEBOX_DIR="$HOME/.claudebox/projects/$project_folder_name"
+    
+    # Get parent directory
+    PROJECT_PARENT_DIR=$(get_parent_dir "$PROJECT_DIR")
+    export PROJECT_PARENT_DIR
+    
+    # Set the actual slot directory that will be mounted in container
+    PROJECT_CLAUDEBOX_DIR="$PROJECT_PARENT_DIR/$project_folder_name"
     export PROJECT_CLAUDEBOX_DIR
 
     if [[ "$found_rebuild" == "true" ]]; then
@@ -107,7 +113,8 @@ main() {
         set -- "${new_args[@]}"
     fi
 
-    mkdir -p "$PROJECT_CLAUDEBOX_DIR"
+    # Initialize project directory (creates parent with profiles.ini)
+    init_project_dir "$PROJECT_DIR"
 
     # Check for help flags early - only check first argument
     if [[ "${1:-}" == "-h" || "${1:-}" == "--help" || "${1:-}" == "help" ]]; then
@@ -149,9 +156,9 @@ main() {
     local current_profiles=()
     local profile_hash=""
 
-    local config_file="$PROJECT_CLAUDEBOX_DIR/config.ini"
-    if [[ -f "$config_file" ]]; then
-        readarray -t current_profiles < <(read_profile_section "$config_file" "profiles")
+    local profiles_file="$PROJECT_PARENT_DIR/profiles.ini"
+    if [[ -f "$profiles_file" ]]; then
+        readarray -t current_profiles < <(read_profile_section "$profiles_file" "profiles")
         local cleaned_profiles=()
         for profile in "${current_profiles[@]}"; do
             profile=$(echo "$profile" | tr -d '[:space:]')
@@ -161,12 +168,12 @@ main() {
         current_profiles=("${cleaned_profiles[@]}")
 
         if [[ ${#current_profiles[@]} -gt 0 ]]; then
-            profile_hash=$(printf '%s\n' "${current_profiles[@]}" | sort | _sha256 | cut -d' ' -f1)
+            profile_hash=$(printf '%s\n' "${current_profiles[@]}" | sort | cksum | cut -d' ' -f1)
         fi
     fi
 
     # Calculate hash of the script itself
-    local script_hash=$(_sha256 "$SCRIPT_PATH" | cut -d' ' -f1)
+    local script_hash=$(crc32_file "$SCRIPT_PATH")
     local build_hash="${script_hash}-${profile_hash}"
     
     # Check if build files have changed
@@ -509,7 +516,7 @@ DOCKERFILE
     fi
 
     # Create default allowlist file if it doesn't exist
-    local allowlist_file="$PROJECT_CLAUDEBOX_DIR/allowlist"
+    local allowlist_file="$PROJECT_PARENT_DIR/allowlist"
     
     if [[ ! -f "$allowlist_file" ]]; then
         # Create allowlist with default domains

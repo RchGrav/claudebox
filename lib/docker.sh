@@ -153,8 +153,22 @@ run_claudebox_container() {
         docker_args+=("${container_args[@]}")
     fi
     
+    # Create lock file for slot (except for pipe mode which is transient)
+    local lock_file="$PROJECT_CLAUDEBOX_DIR/lock"
+    if [[ "$run_mode" != "pipe" ]]; then
+        echo $$ > "$lock_file"
+    fi
+    
     # Run the container
     docker run "${docker_args[@]}"
+    local exit_code=$?
+    
+    # Remove lock file when done (except for detached mode)
+    if [[ "$run_mode" != "pipe" && "$run_mode" != "detached" ]]; then
+        rm -f "$lock_file"
+    fi
+    
+    return $exit_code
 }
 
 check_container_exists() {

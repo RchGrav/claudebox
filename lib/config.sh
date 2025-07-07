@@ -105,7 +105,7 @@ get_profile_file_path() {
     local project_id=$(get_project_folder_name "$PROJECT_DIR")
     local project_dir="$HOME/.claudebox/projects/$project_id"
     mkdir -p "$project_dir"
-    echo "$project_dir/config.ini"
+    echo "$project_dir/profiles.ini"
 }
 
 read_config_value() {
