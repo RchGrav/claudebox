@@ -156,8 +156,9 @@ determine_next_start_container() {
     for ((idx=0; idx<max; idx++)); do
         name=$(generate_container_name "$path" "$idx")
         dir="$parent/$name"
-        # dead slot => ready
-        [[ -d "$dir" ]] || { echo "$name"; return 0; }
+        # Skip non-existent slots - they haven't been created yet
+        [[ -d "$dir" ]] || continue
+        
         lockfile="$dir/lock"
         # unlocked slot => ready
         [[ -f "$lockfile" ]] || { echo "$name"; return 0; }

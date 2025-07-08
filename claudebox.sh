@@ -88,19 +88,18 @@ main() {
         fi
     done
     
-    # Set up project variables early - needed by multiple sections
-    project_folder_name=$(get_project_folder_name "$PROJECT_DIR")
-    IMAGE_NAME="claudebox-${project_folder_name}"
+    # Initialize project directory early (creates parent with profiles.ini)
+    init_project_dir "$PROJECT_DIR"
     
-    # Get parent directory
+    # Get parent directory (always safe to get)
     PROJECT_PARENT_DIR=$(get_parent_dir "$PROJECT_DIR")
     export PROJECT_PARENT_DIR
-    
-    # Set the actual slot directory that will be mounted in container
-    PROJECT_CLAUDEBOX_DIR="$PROJECT_PARENT_DIR/$project_folder_name"
-    export PROJECT_CLAUDEBOX_DIR
 
     if [[ "$found_rebuild" == "true" ]]; then
+        # Need to get slot name for rebuild
+        project_folder_name=$(get_project_folder_name "$PROJECT_DIR")
+        IMAGE_NAME="claudebox-${project_folder_name}"
+        
         warn "Rebuilding ClaudeBox Docker image (no cache)..."
         if docker image inspect "$IMAGE_NAME" &>/dev/null; then
             # Remove the specific container for this project
@@ -136,10 +135,16 @@ main() {
             ;;
     esac
     
-    # Check if Docker image is needed and exists (skip if rebuilding)
+    # For commands that need Docker, set up slot variables
     case "${1:-}" in
-        shell|update|config|mcp|migrate-installer)
-            # These commands need Docker image
+        shell|update|config|mcp|migrate-installer|"")
+            # These commands need a slot
+            project_folder_name=$(get_project_folder_name "$PROJECT_DIR")
+            IMAGE_NAME="claudebox-${project_folder_name}"
+            PROJECT_CLAUDEBOX_DIR="$PROJECT_PARENT_DIR/$project_folder_name"
+            export PROJECT_CLAUDEBOX_DIR
+            
+            # Check if Docker image exists (skip if rebuilding)
             if [[ "${CLAUDEBOX_NO_CACHE:-}" != "true" ]] && [[ ! -f /.dockerenv ]] && ! docker image inspect "$IMAGE_NAME" &>/dev/null; then
                 error "ClaudeBox image not found.\nRun ${GREEN}claudebox${NC} first to build the image."
             fi
@@ -189,24 +194,40 @@ main() {
         need_rebuild=true
     fi
 
-    if docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
-        local image_profile_hash
-        image_profile_hash=$(docker inspect "$IMAGE_NAME" --format '{{index .Config.Labels "claudebox.profiles"}}' 2>/dev/null || echo "")
-
-        if [[ "$profile_hash" != "$image_profile_hash" ]]; then
-            if [[ ${#current_profiles[@]} -gt 0 ]]; then
-                info "Building with profiles: ${current_profiles[*]}"
+    # Only check Docker image for commands that need it
+    case "${1:-}" in
+        profiles|projects|profile|save|install|unlink|allowlist|clean|undo|redo|help|info|create|slots)
+            # These commands don't need Docker image
+            ;;
+        *)
+            # Commands that need Docker - ensure IMAGE_NAME is set
+            if [[ -z "${IMAGE_NAME:-}" ]]; then
+                project_folder_name=$(get_project_folder_name "$PROJECT_DIR")
+                IMAGE_NAME="claudebox-${project_folder_name}"
+                PROJECT_CLAUDEBOX_DIR="$PROJECT_PARENT_DIR/$project_folder_name"
+                export PROJECT_CLAUDEBOX_DIR
             fi
-            docker rmi -f "$IMAGE_NAME" 2>/dev/null || true
-            need_rebuild=true
-        fi
-    else
-        need_rebuild=true
-    fi
+            
+            if docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
+                local image_profile_hash
+                image_profile_hash=$(docker inspect "$IMAGE_NAME" --format '{{index .Config.Labels "claudebox.profiles"}}' 2>/dev/null || echo "")
+
+                if [[ "$profile_hash" != "$image_profile_hash" ]]; then
+                    if [[ ${#current_profiles[@]} -gt 0 ]]; then
+                        info "Building with profiles: ${current_profiles[*]}"
+                    fi
+                    docker rmi -f "$IMAGE_NAME" 2>/dev/null || true
+                    need_rebuild=true
+                fi
+            else
+                need_rebuild=true
+            fi
+            ;;
+    esac
 
     # Only build if needed AND not a command that doesn't require image
     case "${1:-}" in
-        profiles|projects|profile|save|install|unlink|allowlist|clean|undo|redo|help|info)
+        profiles|projects|profile|save|install|unlink|allowlist|clean|undo|redo|help|info|create|slots)
             # These commands don't need Docker image, skip building
             ;;
         *)
