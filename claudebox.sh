@@ -126,7 +126,7 @@ main() {
     
     # First, handle commands that don't require Docker image
     case "${1:-}" in
-        profiles|projects|profile|save|install|unlink|allowlist|clean|undo|redo|help|info)
+        profiles|projects|profile|save|install|unlink|allowlist|clean|undo|redo|help|info|create|slots)
             # These will be handled by dispatch_command
             dispatch_command "$@"
             exit $?

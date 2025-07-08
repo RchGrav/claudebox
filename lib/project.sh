@@ -52,7 +52,7 @@ generate_container_name() {
     for ((i=0; i<idx; i++)); do
         cur=$(crc32_word "$cur")
     done
-    printf '%s_%08X' "$slug" "$cur"
+    printf '%s_%08x' "$slug" "$cur"
 }
 
 # Compute parent project directory: ~/.claudebox/projects/<slug>_<crc-of-index-0>
@@ -186,8 +186,8 @@ get_project_folder_name() {
     if slot_name=$(determine_next_start_container "$path"); then
         echo "$slot_name"
     else
-        # No slots available, create a new one
-        create_container "$path"
+        # No slots available
+        error "No container slots available. Please run 'claudebox create' to create a new container slot."
     fi
 }
 
@@ -269,7 +269,7 @@ resolve_project_path() {
     local input_path="${1:-$PWD}"
     
     # Check if it's already a container name
-    if [[ "$input_path" =~ _[A-F0-9]{8}$ ]]; then
+    if [[ "$input_path" =~ _[a-f0-9]{8}$ ]]; then
         echo "$input_path"
         return 0
     fi
