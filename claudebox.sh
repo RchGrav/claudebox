@@ -52,11 +52,6 @@ done
 main() {
     update_symlink
     
-    local project_folder_name
-    project_folder_name=$(get_project_folder_name "$PROJECT_DIR")
-    IMAGE_NAME="claudebox-${project_folder_name}"
-    export IMAGE_NAME
-    
     local docker_status
     docker_status=$(check_docker; echo $?)
     case $docker_status in

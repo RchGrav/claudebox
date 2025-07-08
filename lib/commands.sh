@@ -929,7 +929,9 @@ _cmd_create() {
     info "Created slot: $slot_name"
     
     # Build Docker image if needed
-    local image_name="claudebox-$(get_project_folder_name "$PROJECT_DIR")"
+    # All slots share the same Docker image based on parent name
+    local parent_name=$(basename "$parent_dir")
+    local image_name="claudebox-${parent_name}"
     if ! docker image inspect "$image_name" &>/dev/null; then
         warn "Docker image not found. Building..."
         # The main script will handle the build
