@@ -33,26 +33,6 @@ update_symlink() {
     fi
 }
 
-setup_project_folder() {
-    mkdir -p "$PROJECT_CLAUDEBOX_DIR/.claude"
-    mkdir -p "$PROJECT_CLAUDEBOX_DIR/.config"
-    mkdir -p "$PROJECT_CLAUDEBOX_DIR/.cache"
-    if [[ ! -f "$PROJECT_CLAUDEBOX_DIR/.claude.json" ]]; then
-        echo '{}' > "$PROJECT_CLAUDEBOX_DIR/.claude.json"
-    fi
-
-    local config_file="$PROJECT_CLAUDEBOX_DIR/config.ini"
-    if [[ ! -f "$config_file" ]]; then
-        cat > "$config_file" <<EOF
-[project]
-path = $PROJECT_DIR
-
-[profiles]
-
-[packages]
-EOF
-    fi
-}
 
 # Ensure shared commands folder exists and is up to date
 setup_shared_commands() {
@@ -89,6 +69,9 @@ setup_shared_commands() {
 }
 
 setup_claude_agent_command() {
+    # Check if PROJECT_CLAUDEBOX_DIR is set
+    [[ -z "${PROJECT_CLAUDEBOX_DIR:-}" ]] && return 0
+    
     # Create commands symlink in project's .claude folder (mounts to ~/.claude in container)
     local shared_commands="$HOME/.claudebox/commands"
     local commands_dest="$PROJECT_CLAUDEBOX_DIR/.claude/commands"
@@ -107,4 +90,4 @@ setup_claude_agent_command() {
     fi
 }
 
-export -f update_symlink setup_project_folder setup_shared_commands setup_claude_agent_command
+export -f update_symlink setup_shared_commands setup_claude_agent_command

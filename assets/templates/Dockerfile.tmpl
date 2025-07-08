@@ -56,6 +56,9 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 RUN echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && \
     echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
 
+# Create virtual environment with uv
+RUN ~/.local/bin/uv venv ~/.venv
+
 RUN git config --global core.pager delta && \
     git config --global interactive.diffFilter "delta --color-only" && \
     git config --global delta.navigate true && \
@@ -130,10 +133,10 @@ if [ -n "$PS1" ] && command -v stty >/dev/null 2>&1; then
   _update_size
 fi
 EOF
-# Label the image with the profile hash for change detection
-LABEL claudebox.profiles=""
-LABEL claudebox.project="home_rich_claudebox_d4faef"
 
+# {{PROFILE_INSTALLATIONS}}
+
+# {{LABELS}}
 
 # Copy init-firewall script
 COPY --chmod=755 init-firewall /home/$USERNAME/init-firewall
@@ -145,8 +148,10 @@ RUN bash -c "source $NVM_DIR/nvm.sh && claude --version"
 WORKDIR /workspace
 USER root
 COPY --chown=$USERNAME docker-entrypoint.sh /usr/local/bin/docker-entrypoint
-RUN sed -i "s/DOCKERUSER/$USERNAME/g" /usr/local/bin/docker-entrypoint && \
-    sed -i "s/DOCKERUSER/$USERNAME/g" /home/$USERNAME/init-firewall && \
+RUN sed -i "s|/home/DOCKERUSER|/home/$USERNAME|g" /usr/local/bin/docker-entrypoint && \
+    sed -i "s|runuser -u DOCKERUSER|runuser -u $USERNAME|g" /usr/local/bin/docker-entrypoint && \
+    sed -i "s|/etc/sudoers.d/DOCKERUSER|/etc/sudoers.d/$USERNAME|g" /usr/local/bin/docker-entrypoint && \
+    sed -i "s|DOCKERUSER|$USERNAME|g" /home/$USERNAME/init-firewall && \
     chmod +x /usr/local/bin/docker-entrypoint
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint"]

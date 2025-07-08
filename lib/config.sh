@@ -102,10 +102,11 @@ expand_profile() {
 
 # -------- Profile file management ---------------------------------------------
 get_profile_file_path() {
-    local project_id=$(get_project_folder_name "$PROJECT_DIR")
-    local project_dir="$HOME/.claudebox/projects/$project_id"
-    mkdir -p "$project_dir"
-    echo "$project_dir/profiles.ini"
+    # Use the parent directory name, not the slot name
+    local parent_name=$(generate_parent_folder_name "$PROJECT_DIR")
+    local parent_dir="$HOME/.claudebox/projects/$parent_name"
+    mkdir -p "$parent_dir"
+    echo "$parent_dir/profiles.ini"
 }
 
 read_config_value() {
@@ -180,5 +181,18 @@ update_profile_section() {
     } > "${profile_file}.tmp" && mv "${profile_file}.tmp" "$profile_file"
 }
 
+get_current_profiles() {
+    local profiles_file="${PROJECT_PARENT_DIR:-$HOME/.claudebox/projects/$(generate_parent_folder_name "$PWD")}/profiles.ini"
+    local current_profiles=()
+    
+    if [[ -f "$profiles_file" ]]; then
+        while IFS= read -r line; do
+            [[ -n "$line" ]] && current_profiles+=("$line")
+        done < <(read_profile_section "$profiles_file" "profiles")
+    fi
+    
+    printf '%s\n' "${current_profiles[@]}"
+}
+
 export -f _read_ini write_default_flag_file get_profile_packages get_profile_description get_all_profile_names profile_exists expand_profile
-export -f get_profile_file_path read_config_value read_profile_section update_profile_section
+export -f get_profile_file_path read_config_value read_profile_section update_profile_section get_current_profiles

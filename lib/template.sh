@@ -117,7 +117,7 @@ if [ "$ENABLE_SUDO" != "true" ]; then
 fi
 
 if [ -n "$CLAUDEBOX_PROJECT_NAME" ]; then
-    CONFIG_FILE="/home/claude/.claudebox/projects/${CLAUDEBOX_PROJECT_NAME}/config.ini"
+    CONFIG_FILE="/home/claude/.claudebox/projects/${CLAUDEBOX_PROJECT_NAME}/profiles.ini"
 
     if command -v uv >/dev/null 2>&1 && [ -f "$CONFIG_FILE" ] && grep -qE 'python|ml|datascience' "$CONFIG_FILE"; then
         if [ ! -d /home/claude/.claudebox/projects/$CLAUDEBOX_PROJECT_NAME/.venv ]; then

@@ -46,33 +46,29 @@ slugify_path() {
 # Generate a container name for a given path and index
 generate_container_name() {
     local path="$1" idx="$2"
-    local slug; slug=$(slugify_path "$path")
     local base_crc; base_crc=$(crc32_string "$path")
     local cur=$base_crc
     for ((i=0; i<idx; i++)); do
         cur=$(crc32_word "$cur")
     done
-    printf '%s_%08x' "$slug" "$cur"
+    printf '%08x' "$cur"
+}
+
+# Generate the parent folder name (with descriptive prefix)
+generate_parent_folder_name() {
+    local path="$1"
+    local slug; slug=$(slugify_path "$path")
+    local base_crc; base_crc=$(crc32_string "$path")
+    printf '%s_%08x' "$slug" "$base_crc"
 }
 
 # Compute parent project directory: ~/.claudebox/projects/<slug>_<crc-of-index-0>
 get_parent_dir() {
-    echo "$HOME/.claudebox/projects/$(generate_container_name "$1" 0)"
+    echo "$HOME/.claudebox/projects/$(generate_parent_folder_name "$1")"
 }
 
-# Verify and (re)create profiles.ini symlink in all slots
-verify_symlinks() {
-    local parent="$1"
-    for dir in "$parent"/*/; do
-        [[ -d "$dir" ]] || continue
-        local link="$dir/profiles.ini"
-        if [[ ! -L "$link" ]] || [[ ! -e "$link" ]]; then
-            ln -sfn "../profiles.ini" "$link"
-        fi
-    done
-}
 
-# Initialize project directory: create parent, counter, central profiles.ini, and verify children
+# Initialize project directory: create parent, counter, central profiles.ini
 init_project_dir() {
     local path="$1" parent
     parent=$(get_parent_dir "$path")
@@ -81,8 +77,6 @@ init_project_dir() {
     [[ -f "$parent/.project_container_counter" ]] || printf '1' > "$parent/.project_container_counter"
     # ensure central profiles.ini
     [[ -f "$parent/profiles.ini" ]] || touch "$parent/profiles.ini"
-    # ensure child symlinks are valid
-    verify_symlinks "$parent"
 }
 
 # Read/write per-project counter with locking
@@ -99,29 +93,42 @@ write_counter() {
 
 # Acquire/release a lock on the counter via mkdir
 lock_counter() {
-    local p="$1" lockdir="$p/.counter.lock"
+    local p="$1"
+    local lockdir="$p/.counter.lock"
     while ! mkdir "$lockdir" 2>/dev/null; do
         sleep 0.05
     done
 }
 
 unlock_counter() {
-    local p="$1" lockdir="$p/.counter.lock"
+    local p="$1"
+    local lockdir="$p/.counter.lock"
     rmdir "$lockdir"
+}
+
+# Initialize a container slot directory
+init_slot_dir() {
+    local dir="$1"
+    mkdir -p "$dir"
+    mkdir -p "$dir/.claude"
+    mkdir -p "$dir/.config"
+    mkdir -p "$dir/.cache"
+    # Initialize .claude.json only if it doesn't exist
+    if [[ ! -f "$dir/.claude.json" ]]; then
+        echo '{}' > "$dir/.claude.json"
+    fi
 }
 
 # Create or reuse a container slot:
 # - Reuse missing "dead" slots first
 # - Otherwise create next new slot
-# - Symlink shared profiles.ini
-# - Protect counter updates with lock
+# - Initialize directories and .claude.json
 create_container() {
     local path="$1" parent idx max name dir
     init_project_dir "$path"
     parent=$(get_parent_dir "$path")
 
-    # lock counter and read max
-    lock_counter "$parent"
+    # read max (no locking needed for single-user system)
     max=$(read_counter "$parent")
 
     # attempt dead-slot reuse
@@ -129,9 +136,7 @@ create_container() {
         name=$(generate_container_name "$path" "$idx")
         dir="$parent/$name"
         if [[ ! -d "$dir" ]]; then
-            mkdir -p "$dir"
-            ln -sfn "../profiles.ini" "$dir/profiles.ini"
-            unlock_counter "$parent"
+            init_slot_dir "$dir"
             echo "$name"
             return
         fi
@@ -141,10 +146,8 @@ create_container() {
     idx=$max
     name=$(generate_container_name "$path" "$idx")
     dir="$parent/$name"
-    mkdir -p "$dir"
-    ln -sfn "../profiles.ini" "$dir/profiles.ini"
+    init_slot_dir "$dir"
     write_counter "$parent" $((max + 1))
-    unlock_counter "$parent"
     echo "$name"
 }
 
@@ -187,15 +190,16 @@ get_project_folder_name() {
     if slot_name=$(determine_next_start_container "$path"); then
         echo "$slot_name"
     else
-        # No slots available
-        error "No container slots available. Please run 'claudebox create' to create a new container slot."
+        # No slots available - return special marker
+        echo "NONE"
+        return 1
     fi
 }
 
 # Get Docker image name for a specific slot
 get_image_name() {
-    local project_folder_name=$(get_project_folder_name "${PROJECT_DIR}")
-    printf 'claudebox-%s' "${project_folder_name}"
+    local parent_folder_name=$(generate_parent_folder_name "${PROJECT_DIR}")
+    printf 'claudebox-%s' "${parent_folder_name}"
 }
 
 # For backwards compatibility
@@ -340,9 +344,9 @@ get_slot_dir() {
 
 # Export all functions
 export -f crc32_word crc32_string crc32_file
-export -f slugify_path generate_container_name get_parent_dir
-export -f verify_symlinks init_project_dir
-export -f read_counter write_counter lock_counter unlock_counter
+export -f slugify_path generate_container_name generate_parent_folder_name get_parent_dir
+export -f init_project_dir init_slot_dir
+export -f read_counter write_counter
 export -f create_container determine_next_start_container
 export -f get_project_folder_name get_image_name _get_project_slug
 export -f get_project_by_path list_all_projects resolve_project_path

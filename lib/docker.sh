@@ -137,12 +137,18 @@ run_claudebox_container() {
     docker_args+=(
         -w /workspace
         -v "$PROJECT_DIR":/workspace
-        -v "$PROJECT_CLAUDEBOX_DIR":/home/$DOCKER_USER/.claudebox
+        -v "$PROJECT_PARENT_DIR":/home/$DOCKER_USER/.claudebox
+        -v "$PROJECT_CLAUDEBOX_DIR/.claude":/home/$DOCKER_USER/.claude
+        -v "$PROJECT_CLAUDEBOX_DIR/.claude.json":/home/$DOCKER_USER/.claude.json
+        -v "$PROJECT_CLAUDEBOX_DIR/.config":/home/$DOCKER_USER/.config
+        -v "$PROJECT_CLAUDEBOX_DIR/.cache":/home/$DOCKER_USER/.cache
         -v "$HOME/.ssh":"/home/$DOCKER_USER/.ssh:ro"
         -e "NODE_ENV=${NODE_ENV:-production}"
         -e "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}"
         -e "CLAUDEBOX_PROJECT_NAME=$project_folder_name"
+        -e "CLAUDEBOX_SLOT_NAME=$project_folder_name"
         -e "TERM=${TERM:-xterm-256color}"
+        -e "VERBOSE=${VERBOSE:-false}"
         --cap-add NET_ADMIN
         --cap-add NET_RAW
         "$IMAGE_NAME"

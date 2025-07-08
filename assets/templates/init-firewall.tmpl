@@ -1,5 +1,7 @@
 #!/bin/bash
 set -euo pipefail
+
+
 if [ "${DISABLE_FIREWALL:-false}" = "true" ]; then
     echo "Firewall disabled, skipping setup"
     rm -f "$0"
@@ -20,7 +22,7 @@ iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
 DEFAULT_DOMAINS="api.anthropic.com console.anthropic.com statsig.anthropic.com sentry.io"
 
 ALLOWED_DOMAINS="$DEFAULT_DOMAINS"
-ALLOWLIST_FILE="/home/claude/.claudebox/projects/${CLAUDEBOX_PROJECT_NAME:-}/allowlist"
+ALLOWLIST_FILE="/home/DOCKERUSER/.claudebox/allowlist"
 if [ -f "$ALLOWLIST_FILE" ]; then
     while IFS= read -r line; do
         [[ "$line" =~ ^#.* ]] && continue
@@ -63,5 +65,4 @@ else
 fi
 iptables -P OUTPUT DROP
 iptables -P INPUT DROP
-echo "Firewall initialized with Anthropic-only access"
 rm -f "$(realpath "$0")"
