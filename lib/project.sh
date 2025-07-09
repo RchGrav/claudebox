@@ -303,9 +303,9 @@ prune_slot_counter() {
     # Update counter if we can prune
     if [ $highest -lt $max ]; then
         write_counter "$parent" $highest
-        return $highest
     fi
-    return $max
+    # Always return 0 for success
+    return 0
 }
 
 # List all slots for current project
@@ -326,11 +326,19 @@ list_project_slots() {
     echo
     
     if [ $max -eq 0 ]; then
-        echo "No slots created yet"
+        echo "No slots created yet for $path"
         echo
-        echo "Create your first slot: claudebox create"
+        echo "Commands:"
+        printf "  %-20s %s\n" "claudebox create" "Create new slot (run from project root)"
         return 0
     fi
+    
+    echo "Commands:"
+    printf "  %-20s %s\n" "claudebox create" "Create new slot"
+    printf "  %-20s %s\n" "claudebox slot <n>" "Launch specific slot"
+    printf "  %-20s %s\n" "claudebox revoke" "Remove highest slot"
+    printf "  %-20s %s\n" "claudebox revoke all" "Remove all unused slots"
+    echo
     
     echo "Slots for $path:"
     echo
@@ -354,8 +362,6 @@ list_project_slots() {
     
     echo
     echo "Total slots: $max"
-    echo
-    echo "Launch a specific slot: claudebox slot <number>"
 }
 
 # Get slot directory by index

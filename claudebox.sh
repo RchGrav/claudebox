@@ -111,10 +111,12 @@ main() {
 
     # First, handle commands that don't require Docker image
     case "${1:-}" in
-        profiles|projects|profile|add|remove|save|install|unlink|allowlist|clean|undo|redo|info|slots|slot)
+        profiles|projects|profile|add|remove|save|install|unlink|allowlist|clean|undo|redo|info|slots|slot|revoke|create|help|-h|--help)
             # These will be handled by dispatch_command
             dispatch_command "$@"
-            exit $?
+            local dispatch_exit=$?
+            [[ "$VERBOSE" == "true" ]] && echo "[DEBUG] Exiting main with code $dispatch_exit" >&2
+            exit $dispatch_exit
             ;;
         *)
             # Default case - need to check if we need to build
@@ -248,7 +250,7 @@ main() {
 
     # Only build if needed AND not a command that doesn't require image
     case "${1:-}" in
-        profiles|projects|add|remove|save|install|unlink|allowlist|clean|undo|redo|help|info|slots)
+        profiles|projects|add|remove|save|install|unlink|allowlist|clean|undo|redo|help|info|slots|revoke|create)
             # These commands don't need Docker image, skip building
             ;;
         *)
@@ -507,6 +509,7 @@ LABEL claudebox.project=\"$project_folder_name\""
         case "${claude_flags[0]:-}" in
             create|shell|config|mcp|migrate-installer|slot|revoke)
                 dispatch_command "${claude_flags[@]}"
+                exit $?
                 ;;
             help|-h|--help)
                 # Handle help specially now that we have IMAGE_NAME

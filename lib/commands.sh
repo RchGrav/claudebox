@@ -62,25 +62,43 @@ show_help() {
   slots                           List all container slots
   slot <number>                   Launch a specific container slot"
     
-    if docker image inspect "$IMAGE_NAME" &>/dev/null; then
-        # Show colored header
-        echo
-        logo header
-        echo
-        
+    if [[ -n "${IMAGE_NAME:-}" ]] && docker image inspect "$IMAGE_NAME" &>/dev/null; then
         # Get Claude's help and blend our additions
-        local claude_help=$(run_claudebox_container "" "pipe" --help 2>/dev/null)
+        local claude_help=$(docker run --rm "$IMAGE_NAME" claude --help 2>&1 | grep -v "iptables")
         
-        # Process the help output:
-        # 1. Replace 'claude' with 'claudebox' in usage line
-        # 2. Insert our options before the Commands: section
-        # 3. Append our commands after Claude's commands
-        echo "$claude_help" | sed "/^Commands:/i\\\n$our_options\n" | sed "1s/claude/claudebox/g"
-        echo "$our_commands"
+        # Process and combine everything in memory
+        local full_help=$(echo "$claude_help" | \
+            sed '1s/claude/claudebox/g' | \
+            sed '/^Commands:/i\
+  --verbose                       Show detailed output\
+  --enable-sudo                   Enable sudo without password\
+  --disable-firewall              Disable network restrictions\
+' | \
+            sed '$ a\
+  profiles                        List all available profiles\
+  projects                        List all projects with paths\
+  add <profiles...>               Add development profiles\
+  remove <profiles...>            Remove development profiles\
+  install <packages>              Install apt packages\
+  save [flags...]                 Save default flags\
+  shell                           Open transient shell\
+  shell admin                     Open admin shell (sudo enabled)\
+  allowlist                       Show/edit firewall allowlist\
+  info                            Show comprehensive project info\
+  clean                           Menu of cleanup tasks\
+  create                          Create new authenticated container slot\
+  slots                           List all container slots\
+  slot <number>                   Launch a specific container slot')
+        
+        # Output everything at once
+        echo
+        logo_small
+        echo
+        echo "$full_help"
     else
         # No Docker image - show compact menu
         echo
-        logo header
+        logo_small
         echo
         echo "Usage: claudebox [OPTIONS] [COMMAND]"
         echo
@@ -100,6 +118,7 @@ show_help() {
 # --- public -------------------------------------------------------------------
 dispatch_command() {
   local cmd="${1:-help}"; shift || true
+  [[ "$VERBOSE" == "true" ]] && echo "[DEBUG] dispatch_command called with: cmd='$cmd' remaining args='$@'" >&2
   case "${cmd}" in
     help|-h|--help)   _cmd_help "$@" ;;
     profiles)         _cmd_profiles "$@" ;;
@@ -125,11 +144,21 @@ dispatch_command() {
     redo)             _cmd_redo "$@" ;;
     *)                _forward_to_container "${cmd}" "$@" ;;
   esac
+  local exit_code=$?
+  [[ "$VERBOSE" == "true" ]] && echo "[DEBUG] dispatch_command returning with exit code: $exit_code" >&2
+  return $exit_code
 }
 
 # --- individual handlers ------------------------------------------------------
 
 _cmd_help() {
+    # Set up IMAGE_NAME if we're in a project directory
+    if [[ -n "${PROJECT_DIR:-}" ]]; then
+        # Initialize project directory to ensure parent exists
+        init_project_dir "$PROJECT_DIR"
+        IMAGE_NAME=$(get_image_name 2>/dev/null || echo "")
+    fi
+    
     show_help
     exit 0
 }
@@ -848,7 +877,7 @@ _cmd_info() {
     echo
 
     cecho "🐳 Docker Status" "$WHITE"
-    if docker image inspect "$IMAGE_NAME" &>/dev/null; then
+    if [[ -n "${IMAGE_NAME:-}" ]] && docker image inspect "$IMAGE_NAME" &>/dev/null; then
         local image_info=$(docker images --filter "reference=$IMAGE_NAME" --format "{{.Size}}")
         echo -e "   Image:      ${GREEN}Ready${NC} ($IMAGE_NAME - $image_info)"
 
@@ -1114,37 +1143,20 @@ _cmd_create() {
     local parent_dir=$(get_parent_dir "$PROJECT_DIR")
     local slot_dir="$parent_dir/$slot_name"
     
-    info "Created slot: $slot_name"
+    success "✓ Created slot: $slot_name"
+    echo
+    info "Slot directory: $slot_dir"
+    echo
     
-    # Build Docker image if needed
-    # All slots share the same Docker image based on parent name
-    local image_name=$(get_image_name)
-    # Image check will be handled by main script
+    # Show updated slots list
+    list_project_slots "$PROJECT_DIR"
     
-    # Run container using standard function
-    # Set up environment to use the new slot
-    export PROJECT_CLAUDEBOX_DIR="$slot_dir"
-    export PROJECT_PARENT_DIR="$parent_dir"
-    export IMAGE_NAME="$image_name"
-    
-    # Run the container in interactive mode
-    run_claudebox_container "" "interactive"
-    
-    # Check if authentication succeeded
-    if [[ -d "$slot_dir/.claude" ]]; then
-        success "✓ Slot $slot_name authenticated successfully!"
-        echo
-        info "You can now use this slot by running: claudebox"
-    else
-        error "Authentication failed. The slot was created but not authenticated."
-    fi
-    
-    exit 0
+    return 0
 }
 
 _cmd_slots() {
     list_project_slots "$PROJECT_DIR"
-    exit 0
+    return 0
 }
 
 _cmd_slot() {
@@ -1180,19 +1192,44 @@ _cmd_slot() {
 }
 
 _cmd_revoke() {
-    local parent=$(get_parent_dir "$PROJECT_DIR")
-    local max=$(read_counter "$parent")
+    [[ "$VERBOSE" == "true" ]] && echo "[DEBUG] Starting _cmd_revoke with PROJECT_DIR=$PROJECT_DIR" >&2
+    local parent
+    parent=$(get_parent_dir "$PROJECT_DIR")
+    [[ "$VERBOSE" == "true" ]] && echo "[DEBUG] parent=$parent" >&2
+    local max
+    max=$(read_counter "$parent")
+    [[ "$VERBOSE" == "true" ]] && echo "[DEBUG] max=$max" >&2
     
     if [ $max -eq 0 ]; then
         echo "No slots to revoke"
         return 0
     fi
     
+    [[ "$VERBOSE" == "true" ]] && echo "[DEBUG] Checking argument: ${1:-}" >&2
+    
     # Check for "all" argument
     if [ "${1:-}" = "all" ]; then
-        cecho "Revoking all unused slots..." "$YELLOW"
+        [[ "$VERBOSE" == "true" ]] && echo "[DEBUG] Processing revoke all" >&2
         local removed_count=0
+        local existing_count=0
         
+        # First count how many slots actually exist
+        [[ "$VERBOSE" == "true" ]] && echo "[DEBUG] Starting count loop, max=$max" >&2
+        for ((idx=1; idx<=max; idx++)); do
+            [[ "$VERBOSE" == "true" ]] && echo "[DEBUG] Count loop idx=$idx" >&2
+            local name
+            name=$(generate_container_name "$PROJECT_DIR" "$idx")
+            [[ "$VERBOSE" == "true" ]] && echo "[DEBUG] Generated name=$name" >&2
+            local dir="$parent/$name"
+            if [ -d "$dir" ]; then
+                ((existing_count++)) || true
+            fi
+        done
+        
+        [[ "$VERBOSE" == "true" ]] && echo "[DEBUG] Finished count loop, existing_count=$existing_count, max=$max" >&2
+        
+        # Now remove them
+        [[ "$VERBOSE" == "true" ]] && echo "[DEBUG] Starting removal loop" >&2
         for ((idx=$max; idx>=1; idx--)); do
             local name=$(generate_container_name "$PROJECT_DIR" "$idx")
             local dir="$parent/$name"
@@ -1202,23 +1239,31 @@ _cmd_revoke() {
                 if docker ps --format "{{.Names}}" | grep -q "^claudebox-.*-${name}$"; then
                     info "Slot $idx is in use, skipping"
                 else
-                    rm -rf "$dir"
-                    ((removed_count++))
-                    success "Revoked slot $idx"
+                    [[ "$VERBOSE" == "true" ]] && echo "[DEBUG] Removing slot $idx: $dir" >&2
+                    if rm -rf "$dir"; then
+                        ((removed_count++)) || true
+                    else
+                        error "Failed to remove slot $idx: $dir"
+                    fi
                 fi
+            else
+                [[ "$VERBOSE" == "true" ]] && echo "[DEBUG] Slot $idx not found: $dir" >&2
             fi
         done
         
-        # Prune the counter
-        prune_slot_counter "$PROJECT_DIR"
-        local new_max=$(read_counter "$parent")
-        
-        echo
-        if [ $removed_count -gt 0 ]; then
-            success "Revoked $removed_count slots. Total slots now: $new_max"
+        # If we removed all existing slots, set counter to 0
+        [[ "$VERBOSE" == "true" ]] && echo "[DEBUG] removed_count=$removed_count, existing_count=$existing_count" >&2
+        if [ $removed_count -eq $existing_count ]; then
+            [[ "$VERBOSE" == "true" ]] && echo "[DEBUG] Setting counter to 0" >&2
+            write_counter "$parent" 0
         else
-            info "No unused slots to revoke"
+            # Otherwise prune the counter
+            [[ "$VERBOSE" == "true" ]] && echo "[DEBUG] Pruning counter" >&2
+            prune_slot_counter "$PROJECT_DIR"
         fi
+        
+        # Show updated slots list
+        list_project_slots "$PROJECT_DIR"
     else
         # Revoke highest slot only
         local name=$(generate_container_name "$PROJECT_DIR" "$max")
@@ -1238,11 +1283,16 @@ _cmd_revoke() {
             # Remove the slot
             rm -rf "$dir"
             write_counter "$parent" $((max - 1))
-            success "Revoked slot $max. Total slots now: $((max - 1))"
         fi
+        
+        # Show updated slots list
+        [[ "$VERBOSE" == "true" ]] && echo "[DEBUG] About to call list_project_slots" >&2
+        list_project_slots "$PROJECT_DIR"
+        [[ "$VERBOSE" == "true" ]] && echo "[DEBUG] list_project_slots returned" >&2
     fi
     
-    exit 0
+    [[ "$VERBOSE" == "true" ]] && echo "[DEBUG] Exiting _cmd_revoke" >&2
+    return 0
 }
 
 _forward_to_container() {
