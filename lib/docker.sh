@@ -3,9 +3,9 @@
 
 # Docker checks
 check_docker() {
-    command -v docker &>/dev/null || return 1
-    docker info &>/dev/null || return 2
-    docker ps &>/dev/null || return 3
+    command -v docker >/dev/null || return 1
+    docker info >/dev/null 2>&1 || return 2
+    docker ps >/dev/null 2>&1 || return 3
     return 0
 }
 
@@ -93,7 +93,7 @@ run_claudebox_container() {
         fillbar
         
         # Wait for container to be ready
-        while ! docker exec "$container_name" true 2>/dev/null; do
+        while ! docker exec "$container_name" true ; do
             sleep 0.1
         done
         
@@ -114,10 +114,9 @@ run_claudebox_container() {
             if [ -t 0 ] && [ -t 1 ]; then
                 docker_args+=("-it")
             fi
-            # Only add --rm if no container name (for persistence)
-            if [[ -z "$container_name" ]]; then
-                docker_args+=("--rm")
-            else
+            # Always use --rm for auto-cleanup
+            docker_args+=("--rm")
+            if [[ -n "$container_name" ]]; then
                 docker_args+=("--name" "$container_name")
             fi
             docker_args+=("--init")
@@ -145,8 +144,8 @@ run_claudebox_container() {
         -v "$HOME/.ssh":"/home/$DOCKER_USER/.ssh:ro"
         -e "NODE_ENV=${NODE_ENV:-production}"
         -e "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}"
-        -e "CLAUDEBOX_PROJECT_NAME=$project_folder_name"
-        -e "CLAUDEBOX_SLOT_NAME=$project_folder_name"
+        -e "CLAUDEBOX_PROJECT_NAME=$(basename "$PROJECT_DIR")"
+        -e "CLAUDEBOX_SLOT_NAME=$(basename "$PROJECT_CLAUDEBOX_DIR")"
         -e "TERM=${TERM:-xterm-256color}"
         -e "VERBOSE=${VERBOSE:-false}"
         --cap-add NET_ADMIN
@@ -159,20 +158,9 @@ run_claudebox_container() {
         docker_args+=("${container_args[@]}")
     fi
     
-    # Create lock file for slot (except for pipe mode which is transient)
-    local lock_file="$PROJECT_CLAUDEBOX_DIR/lock"
-    if [[ "$run_mode" != "pipe" ]]; then
-        echo $$ > "$lock_file"
-    fi
-    
     # Run the container
     docker run "${docker_args[@]}"
     local exit_code=$?
-    
-    # Remove lock file when done (except for detached mode)
-    if [[ "$run_mode" != "pipe" && "$run_mode" != "detached" ]]; then
-        rm -f "$lock_file"
-    fi
     
     return $exit_code
 }
@@ -181,9 +169,9 @@ check_container_exists() {
     local container_name="$1"
     
     # Check if container exists (running or stopped)
-    if docker ps -a --filter "name=^${container_name}$" --format "{{.Names}}" 2>/dev/null | grep -q "^${container_name}$"; then
+    if docker ps -a --filter "name=^${container_name}$" --format "{{.Names}}"  | grep -q "^${container_name}$"; then
         # Check if it's running
-        if docker ps --filter "name=^${container_name}$" --format "{{.Names}}" 2>/dev/null | grep -q "^${container_name}$"; then
+        if docker ps --filter "name=^${container_name}$" --format "{{.Names}}"  | grep -q "^${container_name}$"; then
             echo "running"
         else
             echo "stopped"

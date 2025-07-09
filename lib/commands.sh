@@ -3,63 +3,97 @@
 
 # Show menu when no slots exist
 show_no_slots_menu() {
+    # Reuse the same options and commands from help
+    local our_options="  --verbose                       Show detailed output
+  --enable-sudo                   Enable sudo without password
+  --disable-firewall              Disable network restrictions"
+    
+    local our_commands="  create                          Create new authenticated container slot
+  slots                           List all container slots
+  profiles                        List all available profiles
+  projects                        List all projects with paths
+  add <profiles...>               Add development profiles
+  remove <profiles...>            Remove development profiles
+  install <packages>              Install apt packages
+  save [flags...]                 Save default flags
+  allowlist                       Show/edit firewall allowlist
+  info                            Show comprehensive project info
+  clean                           Menu of cleanup tasks
+  help                            Display help for command"
+    
+    # Show colored header
     echo
-    cecho "ClaudeBox - ${PROJECT_DIR}" "$CYAN"
+    logo header
+    echo "Usage: claudebox [OPTIONS] [COMMAND]"
     echo
-    cecho "Container Management" "$WHITE"
-    echo -e "  ${GREEN}create${NC}                        Create container slot"
-    echo -e "  ${GREEN}slots${NC}                         List all slots"
+    echo "No container slots found for this project."
     echo
-    cecho "Development Profiles" "$WHITE"
-    echo -e "  ${GREEN}profiles${NC}                      List available profiles"
-    echo -e "  ${GREEN}add <names...>${NC}                Add profiles"
-    echo -e "  ${GREEN}remove <names...>${NC}             Remove profiles"
-    echo -e "  ${GREEN}install <packages...>${NC}         Add system packages"
+    echo "Options:"
+    echo "  -h, --help                      Display help for command"
+    echo "$our_options"
     echo
-    cecho "Configuration" "$WHITE"
-    echo -e "  ${GREEN}info${NC}                          Project information"
-    echo -e "  ${GREEN}allowlist${NC}                     Network access control"
-    echo -e "  ${GREEN}save <flags...>${NC}               Set default flags"
+    echo "Commands:"
+    echo "$our_commands"
     echo
-    cecho "Maintenance" "$WHITE"
-    echo -e "  ${GREEN}clean${NC}                         Cleanup options"
-    echo -e "  ${GREEN}projects${NC}                      List all projects"
-    echo -e "  ${GREEN}help${NC}                          Show help"
+    cecho "To get started: claudebox create in the base of your folder." "$YELLOW"
     echo
 }
 
 # Show help function
 show_help() {
+    # Our additional options to inject
+    local our_options="  --verbose                       Show detailed output
+  --enable-sudo                   Enable sudo without password
+  --disable-firewall              Disable network restrictions"
+    
+    # Our additional commands to append
+    local our_commands="  profiles                        List all available profiles
+  projects                        List all projects with paths
+  add <profiles...>               Add development profiles
+  remove <profiles...>            Remove development profiles
+  install <packages>              Install apt packages
+  save [flags...]                 Save default flags
+  shell                           Open transient shell
+  shell admin                     Open admin shell (sudo enabled)
+  allowlist                       Show/edit firewall allowlist
+  info                            Show comprehensive project info
+  clean                           Menu of cleanup tasks
+  create                          Create new authenticated container slot
+  slots                           List all container slots
+  slot <number>                   Launch a specific container slot"
+    
     if docker image inspect "$IMAGE_NAME" &>/dev/null; then
-        run_claudebox_container "" "pipe" --help | sed '1s/claude/claudebox/g'
+        # Show colored header
         echo
-        cecho "Added Options:" "$WHITE"
-        echo -e "${CYAN}  --verbose                       ${WHITE}Show detailed output"
-        echo -e "${CYAN}  --enable-sudo                   ${WHITE}Enable sudo without password"
-        echo -e "${CYAN}  --disable-firewall              ${WHITE}Disable network restrictions"
+        logo header
         echo
-        cecho "Added Commands:" "$WHITE"
-        echo -e "  profiles                        List all available profiles"
-        echo -e "  projects                        List all projects with paths"
-        echo -e "  profile                         Profile management menu"
-        echo -e "  add <profiles...>               Add development profiles"
-        echo -e "  remove <profiles...>            Remove development profiles"
-        echo -e "  install <packages>              Install apt packages"
-        echo -e "  save [flags...]                 Save default flags (no args = clear saved flags)"
-        echo -e "  shell                           Open transient shell (changes NOT saved)"
-        echo -e "  shell admin                     Open admin shell (sudo, no firewall, changes saved)"
-        echo -e "  allowlist                       Show/edit firewall allowlist"
-        echo -e "  info                            Show comprehensive project info"
-        echo -e "  clean                           Menu of cleanup tasks"
-        echo -e "  unlink                          Remove claudebox symlink"
-        echo -e "  rebuild                         Rebuild the Docker image from scratch"
-        echo -e "  create                          Create new authenticated container slot"
-        echo -e "  slots                           List all container slots for this project${NC}"
+        
+        # Get Claude's help and blend our additions
+        local claude_help=$(run_claudebox_container "" "pipe" --help 2>/dev/null)
+        
+        # Process the help output:
+        # 1. Replace 'claude' with 'claudebox' in usage line
+        # 2. Insert our options before the Commands: section
+        # 3. Append our commands after Claude's commands
+        echo "$claude_help" | sed "/^Commands:/i\\\n$our_options\n" | sed "1s/claude/claudebox/g"
+        echo "$our_commands"
     else
-        cecho "ClaudeBox - Claude Code Docker Environment" "$CYAN"
+        # No Docker image - show compact menu
         echo
-        warn "First run setup required!"
-        echo "Run script without arguments first to build the Docker image."
+        logo header
+        echo
+        echo "Usage: claudebox [OPTIONS] [COMMAND]"
+        echo
+        echo "Docker Environment for Claude CLI"
+        echo
+        echo "Options:"
+        echo "  -h, --help                      Display help for command"
+        echo "$our_options"
+        echo
+        echo "Commands:"
+        echo "$our_commands"
+        echo
+        warn "Run 'claudebox create' to get started!"
     fi
 }
 
@@ -84,6 +118,8 @@ dispatch_command() {
     update)           _cmd_update "$@" ;;
     create)           _cmd_create "$@" ;;
     slots)            _cmd_slots "$@" ;;
+    slot)             _cmd_slot "$@" ;;
+    revoke)           _cmd_revoke "$@" ;;
     config|mcp|migrate-installer) _cmd_special "$cmd" "$@" ;;
     undo)             _cmd_undo "$@" ;;
     redo)             _cmd_redo "$@" ;;
@@ -408,7 +444,6 @@ _cmd_shell() {
                 shift
                 ;;
             *)
-                warn "Unknown shell flag: $1"
                 shift
                 ;;
         esac
@@ -437,7 +472,7 @@ _cmd_shell() {
         }
         trap cleanup_admin EXIT
         
-        run_claudebox_container "$temp_container" "interactive" --shell-mode "${shell_flags[@]}"
+        run_claudebox_container "$temp_container" "interactive" shell "${shell_flags[@]}"
         
         # Commit changes back to image
         fillbar
@@ -447,7 +482,7 @@ _cmd_shell() {
         success "Changes saved to image!"
     else
         # Regular shell mode - just run without committing
-        run_claudebox_container "" "interactive" --shell-mode "${shell_flags[@]}"
+        run_claudebox_container "" "interactive" shell "${shell_flags[@]}"
     fi
     
     exit 0
@@ -1083,30 +1118,17 @@ _cmd_create() {
     
     # Build Docker image if needed
     # All slots share the same Docker image based on parent name
-    local parent_name=$(basename "$parent_dir")
-    local image_name="claudebox-${parent_name}"
+    local image_name=$(get_image_name)
     # Image check will be handled by main script
-    # Just continue with the OAuth setup
     
-    # Launch OAuth wizard in the container
-    info "Launching authentication wizard..."
-    echo
-    cecho "Please follow these steps:" "$YELLOW"
-    echo "1. Copy the URL that appears"
-    echo "2. Open it in your browser"
-    echo "3. Authenticate with Claude"
-    echo "4. Copy the token and paste it back here"
-    echo
+    # Run container using standard function
+    # Set up environment to use the new slot
+    export PROJECT_CLAUDEBOX_DIR="$slot_dir"
+    export PROJECT_PARENT_DIR="$parent_dir"
+    export IMAGE_NAME="$image_name"
     
-    # Run container with slot directory mounted
-    local container_name="claudebox-auth-$(date +%s)"
-    docker run -it --rm \
-        --name "$container_name" \
-        -v "$slot_dir":/home/$DOCKER_USER/.claudebox \
-        -v "$PROJECT_DIR":/workspace \
-        -w /workspace \
-        "$image_name" \
-        claude login
+    # Run the container in interactive mode
+    run_claudebox_container "" "interactive"
     
     # Check if authentication succeeded
     if [[ -d "$slot_dir/.claude" ]]; then
@@ -1122,6 +1144,104 @@ _cmd_create() {
 
 _cmd_slots() {
     list_project_slots "$PROJECT_DIR"
+    exit 0
+}
+
+_cmd_slot() {
+    # Extract slot number - it should be the first argument
+    local slot_num="${1:-}"
+    shift || true  # Remove slot number from arguments
+    
+    # Validate slot number
+    if [[ ! "$slot_num" =~ ^[0-9]+$ ]]; then
+        error "Usage: claudebox slot <number> [claude arguments...]"
+    fi
+    
+    # Get the slot directory
+    local slot_dir=$(get_slot_dir "$PROJECT_DIR" "$slot_num")
+    local slot_name=$(basename "$slot_dir")
+    
+    # Check if slot exists
+    if [[ ! -d "$slot_dir" ]]; then
+        error "Slot $slot_num does not exist. Run 'claudebox slots' to see available slots."
+    fi
+    
+    # Set up environment for this specific slot
+    local parent_dir=$(get_parent_dir "$PROJECT_DIR")
+    export PROJECT_CLAUDEBOX_DIR="$slot_dir"
+    export PROJECT_PARENT_DIR="$parent_dir"
+    export IMAGE_NAME=$(get_image_name)
+    
+    info "Using slot $slot_num: $slot_name"
+    
+    # Run container with remaining arguments passed to claude
+    run_claudebox_container "" "interactive" "$@"
+    exit 0
+}
+
+_cmd_revoke() {
+    local parent=$(get_parent_dir "$PROJECT_DIR")
+    local max=$(read_counter "$parent")
+    
+    if [ $max -eq 0 ]; then
+        echo "No slots to revoke"
+        return 0
+    fi
+    
+    # Check for "all" argument
+    if [ "${1:-}" = "all" ]; then
+        cecho "Revoking all unused slots..." "$YELLOW"
+        local removed_count=0
+        
+        for ((idx=$max; idx>=1; idx--)); do
+            local name=$(generate_container_name "$PROJECT_DIR" "$idx")
+            local dir="$parent/$name"
+            
+            if [ -d "$dir" ]; then
+                # Check if container is running
+                if docker ps --format "{{.Names}}" | grep -q "^claudebox-.*-${name}$"; then
+                    info "Slot $idx is in use, skipping"
+                else
+                    rm -rf "$dir"
+                    ((removed_count++))
+                    success "Revoked slot $idx"
+                fi
+            fi
+        done
+        
+        # Prune the counter
+        prune_slot_counter "$PROJECT_DIR"
+        local new_max=$(read_counter "$parent")
+        
+        echo
+        if [ $removed_count -gt 0 ]; then
+            success "Revoked $removed_count slots. Total slots now: $new_max"
+        else
+            info "No unused slots to revoke"
+        fi
+    else
+        # Revoke highest slot only
+        local name=$(generate_container_name "$PROJECT_DIR" "$max")
+        local dir="$parent/$name"
+        
+        if [ ! -d "$dir" ]; then
+            # Slot doesn't exist, just prune the counter
+            prune_slot_counter "$PROJECT_DIR"
+            local new_max=$(read_counter "$parent")
+            info "Slot $max doesn't exist. Counter adjusted to $new_max"
+        else
+            # Check if container is running
+            if docker ps --format "{{.Names}}" | grep -q "^claudebox-.*-${name}$"; then
+                error "Cannot revoke slot $max - it is currently in use"
+            fi
+            
+            # Remove the slot
+            rm -rf "$dir"
+            write_counter "$parent" $((max - 1))
+            success "Revoked slot $max. Total slots now: $((max - 1))"
+        fi
+    fi
+    
     exit 0
 }
 

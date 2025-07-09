@@ -131,8 +131,8 @@ create_container() {
     # read max (no locking needed for single-user system)
     max=$(read_counter "$parent")
 
-    # attempt dead-slot reuse
-    for ((idx=0; idx<max; idx++)); do
+    # attempt dead-slot reuse (starting from slot 1)
+    for ((idx=1; idx<=max; idx++)); do
         name=$(generate_container_name "$path" "$idx")
         dir="$parent/$name"
         if [[ ! -d "$dir" ]]; then
@@ -142,34 +142,30 @@ create_container() {
         fi
     done
 
-    # no dead slot: provision new at index=max
-    idx=$max
+    # no dead slot: provision new at index=max+1
+    idx=$((max + 1))
     name=$(generate_container_name "$path" "$idx")
     dir="$parent/$name"
     init_slot_dir "$dir"
-    write_counter "$parent" $((max + 1))
+    write_counter "$parent" $idx
     echo "$name"
 }
 
-# Determine next container to start (skipping in-use & stale locks)
+# Determine next container to start (skipping running containers)
 determine_next_start_container() {
-    local path="$1" parent max idx name dir lockfile pid
+    local path="$1" parent max idx name dir
     parent=$(get_parent_dir "$path")
     max=$(read_counter "$parent")
-    for ((idx=0; idx<max; idx++)); do
+    for ((idx=1; idx<=max; idx++)); do
         name=$(generate_container_name "$path" "$idx")
         dir="$parent/$name"
         # Skip non-existent slots - they haven't been created yet
-        [[ -d "$dir" ]] || continue
+        [ -d "$dir" ] || continue
         
-        lockfile="$dir/lock"
-        # unlocked slot => ready
-        [[ -f "$lockfile" ]] || { echo "$name"; return 0; }
-        pid=$(<"$lockfile")
-        # stale lock => ready
-        if ! ps -p "$pid" > /dev/null; then
-            rm -f "$lockfile"
-            echo "$name"; return 0
+        # Check if a container with this slot name is running
+        if ! docker ps --format "{{.Names}}" | grep -q "^claudebox-.*-${name}$"; then
+            echo "$name"
+            return 0
         fi
     done
     return 1
@@ -192,7 +188,6 @@ get_project_folder_name() {
     else
         # No slots available - return special marker
         echo "NONE"
-        return 1
     fi
 }
 
@@ -257,7 +252,7 @@ list_all_projects() {
         local image_status="❌"
         local image_size="-"
         
-        if docker image inspect "$image_name" &>/dev/null; then
+        if docker image inspect "$image_name" >/dev/null 2>&1; then
             image_status="✅"
             image_size=$(docker images --filter "reference=$image_name" --format "{{.Size}}")
         fi
@@ -289,48 +284,78 @@ resolve_project_path() {
 # New Multi-Slot Functions
 # ============================================================================
 
+# Auto-prune counter to remove trailing missing slots
+prune_slot_counter() {
+    local path="$1"
+    local parent=$(get_parent_dir "$path")
+    local max=$(read_counter "$parent")
+    
+    # Find highest existing slot
+    local highest=0
+    for ((idx=1; idx<=max; idx++)); do
+        local name=$(generate_container_name "$path" "$idx")
+        local dir="$parent/$name"
+        if [ -d "$dir" ]; then
+            highest=$idx
+        fi
+    done
+    
+    # Update counter if we can prune
+    if [ $highest -lt $max ]; then
+        write_counter "$parent" $highest
+        return $highest
+    fi
+    return $max
+}
+
 # List all slots for current project
 list_project_slots() {
     local path="${1:-$PWD}"
     local parent=$(get_parent_dir "$path")
     
-    if [[ ! -d "$parent" ]]; then
+    if [ ! -d "$parent" ]; then
         echo "No project found for path: $path"
         return 1
     fi
     
+    # Prune counter first
+    prune_slot_counter "$path"
     local max=$(read_counter "$parent")
-    echo "Project: $(basename "$parent")"
-    echo "Total slots: $max"
+    
+    logo_small
     echo
     
-    for ((idx=0; idx<max; idx++)); do
+    if [ $max -eq 0 ]; then
+        echo "No slots created yet"
+        echo
+        echo "Create your first slot: claudebox create"
+        return 0
+    fi
+    
+    echo "Slots for $path:"
+    echo
+    
+    for ((idx=1; idx<=max; idx++)); do
         local name=$(generate_container_name "$path" "$idx")
         local dir="$parent/$name"
-        local status="[DEAD]"
+        local status="removed"
         
-        if [[ -d "$dir" ]]; then
-            if [[ -f "$dir/lock" ]]; then
-                local pid=$(<"$dir/lock")
-                if ps -p "$pid" > /dev/null; then
-                    status="[ACTIVE: PID $pid]"
-                else
-                    status="[STALE LOCK]"
-                fi
+        if [ -d "$dir" ]; then
+            # Check if a container with this slot name is running
+            if docker ps --format "{{.Names}}" | grep -q "^claudebox-.*-${name}$"; then
+                status="in use"
             else
-                status="[AVAILABLE]"
-            fi
-            
-            # Check if authenticated
-            if [[ -d "$dir/.claude" ]]; then
-                status="$status [AUTHENTICATED]"
-            else
-                status="$status [NOT AUTHENTICATED]"
+                status="available"
             fi
         fi
         
-        printf "  Slot %d: %s %s\n" "$idx" "$name" "$status"
+        printf "  Slot %d: %s\n" "$idx" "$status"
     done
+    
+    echo
+    echo "Total slots: $max"
+    echo
+    echo "Launch a specific slot: claudebox slot <number>"
 }
 
 # Get slot directory by index
@@ -342,6 +367,24 @@ get_slot_dir() {
     echo "$parent/$name"
 }
 
+# Get slot index by name
+get_slot_index() {
+    local slot_name="$1"
+    local parent_dir="$2"
+    local path=$(dirname "$parent_dir")  # Get original path from parent
+    local max=$(read_counter "$parent_dir")
+    
+    for ((idx=0; idx<max; idx++)); do
+        local name=$(generate_container_name "$path" "$idx")
+        if [[ "$name" == "$slot_name" ]]; then
+            echo "$idx"
+            return 0
+        fi
+    done
+    echo "-1"
+    return 1
+}
+
 # Export all functions
 export -f crc32_word crc32_string crc32_file
 export -f slugify_path generate_container_name generate_parent_folder_name get_parent_dir
@@ -350,4 +393,4 @@ export -f read_counter write_counter
 export -f create_container determine_next_start_container
 export -f get_project_folder_name get_image_name _get_project_slug
 export -f get_project_by_path list_all_projects resolve_project_path
-export -f list_project_slots get_slot_dir
+export -f list_project_slots get_slot_dir get_slot_index prune_slot_counter

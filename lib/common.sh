@@ -9,16 +9,17 @@ readonly BLUE='\033[0;34m'
 readonly PURPLE='\033[0;35m'
 readonly CYAN='\033[0;36m'
 readonly WHITE='\033[1;37m'
+readonly DIM='\033[2m'
 readonly NC='\033[0m'
 
 # -------- utility functions ---------------------------------------------------
-cecho() { echo -e "${2:-$NC}$1${NC}"; }
+cecho() { printf "${2:-$NC}%s${NC}\n" "$1"; }
 error() { cecho "$1" "$RED" >&2; exit "${2:-1}"; }
 warn() { cecho "$1" "$YELLOW"; }
 info() { cecho "$1" "$BLUE"; }
 success() { cecho "$1" "$GREEN"; }
 
-# -------- logo function -------------------------------------------------------
+# -------- logo functions ------------------------------------------------------
 logo() {
     local cb='
  ██████╗██╗      █████╗ ██╗   ██╗██████╗ ███████╗
@@ -39,17 +40,52 @@ logo() {
         o="" c=""
         for ((i=0;i<${#l};i++)); do
             ch="${l:$i:1}"
-            [[ "$ch" == " " ]] && { o+="$ch"; continue; }
+            [ "$ch" = " " ] && { o+="$ch"; continue; }
             cc=$(printf '%d' "'$ch" 2>/dev/null||echo 0)
-            if [[ $cc -ge 32 && $cc -le 126 ]]; then n='\033[33m'
-            elif [[ $cc -ge 9552 && $cc -le 9580 ]]; then n='\033[34m'
-            elif [[ $cc -eq 9608 ]]; then n='\033[31m'
-            else n='\033[37m'; fi
-            [[ "$n" != "$c" ]] && { o+="$n"; c="$n"; }
+            if [ $cc -ge 32 ] && [ $cc -le 126 ]; then n='\033[33m'      # Yellow for regular text
+            elif [ $cc -ge 9552 ] && [ $cc -le 9580 ]; then n='\033[34m'  # Blue for box drawing
+            elif [ $cc -eq 9608 ]; then n='\033[31m'                      # Red for block chars
+            else n='\033[37m'; fi                                          # White for others
+            [ "$n" != "$c" ] && { o+="$n"; c="$n"; }
             o+="$ch"
         done
-        echo -e "${o}\033[0m"
+        printf "${o}\033[0m\n"
     done <<< "$cb"
+}
+
+logo_header() {
+    local cb='
+╔════════════════════════════════════════════════════════════════════════════╗
+║                                                                            ║
+║  █▀▀ █   ▄▀█ █ █ █▀▄ █▀▀ █▄▄ █▀█ ▀▄▀   Docker Environment for Claude Code  ║
+║  █▄▄ █▄▄ █▀█ █▄█ █▄▀ ██▄ █▄█ █▄█ █ █    Isolated  •  Secure  •  Powerful   ║
+║                                                                            ║
+╚════════════════════════════════════════════════════════════════════════════╝
+'
+    while IFS= read -r l; do
+        o="" c=""
+        for ((i=0;i<${#l};i++)); do
+            ch="${l:$i:1}"
+            [ "$ch" = " " ] && { o+="$ch"; continue; }
+            cc=$(printf '%d' "'$ch" 2>/dev/null||echo 0)
+            if [ $cc -ge 32 ] && [ $cc -le 126 ] && [ "$ch" != "•" ]; then n='\033[37m'      # White for regular text
+            elif [ $cc -ge 9552 ] && [ $cc -le 9580 ]; then n='\033[90m'  # Grey for box drawing
+            elif [ $cc -eq 9608 ] || [ $cc -ge 9600 ] && [ $cc -le 9631 ]; then n='\033[37m'  # White for block chars
+            elif [ "$ch" = "•" ]; then n='\033[31m'                       # Red for bullets
+            else n='\033[37m'; fi                                          # White for others
+            [ "$n" != "$c" ] && { o+="$n"; c="$n"; }
+            o+="$ch"
+        done
+        printf "${o}\033[0m\n"
+    done <<< "$cb"
+}
+
+logo_small() {
+    local cb='
+█▀▀ █   ▄▀█ █ █ █▀▄ █▀▀ █▄▄ █▀█ ▀▄▀
+█▄▄ █▄▄ █▀█ █▄█ █▄▀ ██▄ █▄█ █▄█ █ █
+'
+    printf "${WHITE}%s${NC}" "$cb"
 }
 
 # -------- spinner function ----------------------------------------------------
@@ -102,4 +138,4 @@ fillbar() {
     esac
 }
 
-export -f cecho error warn info success logo show_spinner fillbar
+export -f cecho error warn info success logo logo_header logo_small show_spinner fillbar

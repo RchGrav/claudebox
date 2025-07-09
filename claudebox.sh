@@ -8,6 +8,9 @@
 
 set -euo pipefail
 
+# Add error handler to show where script fails
+trap 'exit_code=$?; [[ $exit_code -eq 130 ]] && exit 130 || echo "Error at line $LINENO: Command failed with exit code $exit_code" >&2' ERR INT
+
 # ------------------------------------------------------------------ constants --
 # Cross-platform script path resolution
 get_script_path() {
@@ -43,13 +46,14 @@ if [[ -f "$HOME/.claudebox/default-flags" ]]; then
 fi
 
 # --------------------------------------------------------------- source libs --
-for lib in common env os state project docker config template commands; do
+for lib in common env os state project docker config template commands welcome; do
     # shellcheck disable=SC1090
     source "${SCRIPT_DIR}/lib/${lib}.sh"
 done
 
 # -------------------------------------------------------------------- main() --
 main() {
+    [[ "$VERBOSE" == "true" ]] && echo "[DEBUG] Starting main with args: $*" >&2
     update_symlink
 
     local docker_status
@@ -60,8 +64,8 @@ main() {
             warn "Docker is installed but not running."
             warn "Starting Docker requires sudo privileges..."
             sudo systemctl start docker
-            docker info &>/dev/null || error "Failed to start Docker"
-            docker ps &>/dev/null || configure_docker_nonroot
+            docker info || error "Failed to start Docker"
+            docker ps || configure_docker_nonroot
             ;;
         3)
             warn "Docker requires sudo. Setting up non-root access..."
@@ -94,32 +98,20 @@ main() {
         # Get image name for rebuild
         IMAGE_NAME=$(get_image_name)
 
-        warn "Rebuilding ClaudeBox Docker image (no cache)..."
-        if docker image inspect "$IMAGE_NAME" &>/dev/null; then
-            # Remove the specific container for this project
-            docker rm -f "$IMAGE_NAME" 2>/dev/null || true
-            # Remove any old labeled containers
-            docker ps -a --filter "label=claudebox.project" -q | xargs -r docker rm -f 2>/dev/null || true
-            docker rmi -f "$IMAGE_NAME" 2>/dev/null || true
-        fi
-        export CLAUDEBOX_NO_CACHE=true
+        warn "Rebuilding ClaudeBox Docker image..."
+        # Don't use --no-cache to keep layer caching for fast rebuilds
+        # export CLAUDEBOX_NO_CACHE=true
         set -- "${new_args[@]}"
     fi
 
     # Initialize project directory (creates parent with profiles.ini)
     init_project_dir "$PROJECT_DIR"
 
-    # Check for help flags early - only check first argument
-    if [[ "${1:-}" == "-h" || "${1:-}" == "--help" || "${1:-}" == "help" ]]; then
-        show_help
-        exit 0
-    fi
-
     [[ "$VERBOSE" == "true" ]] && echo "Command: ${1:-none}" >&2
 
     # First, handle commands that don't require Docker image
     case "${1:-}" in
-        profiles|projects|profile|add|remove|save|install|unlink|allowlist|clean|undo|redo|help|info|slots)
+        profiles|projects|profile|add|remove|save|install|unlink|allowlist|clean|undo|redo|info|slots|slot)
             # These will be handled by dispatch_command
             dispatch_command "$@"
             exit $?
@@ -131,14 +123,20 @@ main() {
 
     # For commands that need Docker, set up slot variables
     case "${1:-}" in
-        shell|update|config|mcp|migrate-installer|create|"")
-            # These commands need a slot
-            project_folder_name=$(get_project_folder_name "$PROJECT_DIR" 2>/dev/null)
+        shell|update|config|mcp|migrate-installer|create|slot|help|-h|--help|"")
+            # These commands need a slot (help benefits from having one)
+            project_folder_name=$(get_project_folder_name "$PROJECT_DIR")
             
-            # If no slots exist, show menu and exit
+            # If no slots exist, show menu and exit (except for create, slot, and help commands)
             if [[ -z "$project_folder_name" ]] || [[ "$project_folder_name" == "NONE" ]]; then
-                show_no_slots_menu
-                exit 0
+                if [[ "${1:-}" == "help" || "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+                    # For help, we can show it without a slot
+                    show_help
+                    exit 0
+                elif [[ "${1:-}" != "create" && "${1:-}" != "slot" ]]; then
+                    show_no_slots_menu
+                    exit 0
+                fi
             fi
             
             IMAGE_NAME=$(get_image_name)
@@ -147,7 +145,7 @@ main() {
 
             # Check if Docker image exists for commands that require it (skip if rebuilding or default command)
             # Allow create command to trigger build
-            if [[ "${1:-}" != "" ]] && [[ "${1:-}" != "create" ]] && [[ "${CLAUDEBOX_NO_CACHE:-}" != "true" ]] && [[ ! -f /.dockerenv ]] && ! docker image inspect "$IMAGE_NAME" &>/dev/null; then
+            if [[ "${1:-}" != "" ]] && [[ "${1:-}" != "create" ]] && [[ "${CLAUDEBOX_NO_CACHE:-}" != "true" ]] && [[ ! -f /.dockerenv ]] && ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
                 error "ClaudeBox image not found.\nRun ${GREEN}claudebox${NC} first to build the image."
             fi
             ;;
@@ -195,7 +193,8 @@ main() {
         if [[ "$build_hash" != "$last_build_hash" ]]; then
             # Only remove image if IMAGE_NAME is set
             if [[ -n "${IMAGE_NAME:-}" ]]; then
-                docker rmi -f "$IMAGE_NAME" 2>/dev/null || true
+                [[ "$VERBOSE" == "true" ]] && echo "[DEBUG] Removing old image: $IMAGE_NAME" >&2
+                docker rmi -f "$IMAGE_NAME" || true
             fi
             need_rebuild=true
         fi
@@ -206,13 +205,13 @@ main() {
 
     # Only check Docker image for commands that need it
     case "${1:-}" in
-        profiles|projects|add|remove|save|install|unlink|allowlist|clean|undo|redo|help|info|slots)
+        profiles|projects|add|remove|save|install|unlink|allowlist|clean|undo|redo|help|info|slots|slot|revoke)
             # These commands don't need Docker image
             ;;
         *)
             # Commands that need Docker - ensure IMAGE_NAME is set
             if [[ -z "${IMAGE_NAME:-}" ]]; then
-                project_folder_name=$(get_project_folder_name "$PROJECT_DIR" 2>/dev/null)
+                project_folder_name=$(get_project_folder_name "$PROJECT_DIR")
                 
                 # If no slots exist, this was already handled above
                 if [[ -z "$project_folder_name" ]] || [[ "$project_folder_name" == "NONE" ]]; then
@@ -227,8 +226,8 @@ main() {
             if docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
                 local image_profile_hash
                 local image_profiles_crc
-                image_profile_hash=$(docker inspect "$IMAGE_NAME" --format '{{index .Config.Labels "claudebox.profiles"}}' 2>/dev/null || echo "")
-                image_profiles_crc=$(docker inspect "$IMAGE_NAME" --format '{{index .Config.Labels "claudebox.profiles.crc"}}' 2>/dev/null || echo "")
+                image_profile_hash=$(docker inspect "$IMAGE_NAME" --format '{{index .Config.Labels "claudebox.profiles"}}' || echo "")
+                image_profiles_crc=$(docker inspect "$IMAGE_NAME" --format '{{index .Config.Labels "claudebox.profiles.crc"}}' || echo "")
 
                 # Check if either profile list or profiles.ini file has changed
                 if [[ "$profile_hash" != "$image_profile_hash" ]] || [[ "$profiles_file_hash" != "$image_profiles_crc" ]]; then
@@ -237,7 +236,8 @@ main() {
                     else
                         info "Profiles.ini changed, rebuilding..."
                     fi
-                    docker rmi -f "$IMAGE_NAME" 2>/dev/null || true
+                    [[ "$VERBOSE" == "true" ]] && echo "[DEBUG] Removing old image: $IMAGE_NAME" >&2
+                docker rmi -f "$IMAGE_NAME" || true
                     need_rebuild=true
                 fi
             else
@@ -253,7 +253,19 @@ main() {
             ;;
         *)
             if [[ "$need_rebuild" == "true" ]] || ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
-                logo
+                # Check if this is the first run for this project
+                local is_first_run=false
+                if [[ ! -d "$PROJECT_PARENT_DIR" ]] || [[ ! -f "$PROJECT_PARENT_DIR/profiles.ini" ]]; then
+                    is_first_run=true
+                fi
+                
+                # Show welcome screen for first-time users
+                if [[ "$is_first_run" == "true" ]] && [[ "${1:-}" == "" ]]; then
+                    show_welcome_screen
+                else
+                    logo
+                fi
+                
                 local build_context="$HOME/.claudebox/build"
                 mkdir -p "$build_context"
                 local dockerfile="$build_context/Dockerfile"
@@ -385,6 +397,12 @@ LABEL claudebox.project=\"$project_folder_name\""
                 # Save build hash
                 mkdir -p "$(dirname "$last_build_hash_file")"
                 echo "$build_hash" > "$last_build_hash_file"
+                
+                # Show next steps for first-time users
+                if [[ "$is_first_run" == "true" ]] && [[ "${1:-}" == "" ]]; then
+                    show_next_steps
+                    exit 0
+                fi
             fi
             ;;
     esac
@@ -421,7 +439,7 @@ LABEL claudebox.project=\"$project_folder_name\""
     # Using function for Bash 3.2 compatibility
     get_control_flag_priority() {
         case "$1" in
-            "--shell-mode") echo 1 ;;
+            "shell") echo 1 ;;
             "--enable-sudo") echo 2 ;;
             "--disable-firewall") echo 3 ;;
             *) echo "" ;;
@@ -477,17 +495,31 @@ LABEL claudebox.project=\"$project_folder_name\""
         # Only commit if an actual update occurred
         if echo "$update_output" | grep -q "Successfully updated\|Verifying update"; then
             fillbar
-            docker commit "$temp_container" "$IMAGE_NAME" >/dev/null
+            docker commit "$temp_container" "$IMAGE_NAME"
             fillbar stop
             success "Claude updated and changes saved to image!"
         fi
 
         # Always remove the container
-        docker rm -f "$temp_container" >/dev/null 2>&1
+        docker rm -f "$temp_container" >/dev/null
     else
-        # For now, just run the container directly without persistence
-        # This approach is simpler and more reliable
-        run_claudebox_container "" "interactive" ${control_flags[@]+"${control_flags[@]}"} ${claude_flags[@]+"${claude_flags[@]}"}
+        # Check if this is a special command that should be dispatched
+        case "${claude_flags[0]:-}" in
+            create|shell|config|mcp|migrate-installer|slot|revoke)
+                dispatch_command "${claude_flags[@]}"
+                ;;
+            help|-h|--help)
+                # Handle help specially now that we have IMAGE_NAME
+                show_help
+                ;;
+            *)
+                # Default: run Claude
+                # Generate container name based on project and slot
+                local slot_name=$(basename "$PROJECT_CLAUDEBOX_DIR")
+                local container_name="claudebox-${project_folder_name}-${slot_name}"
+                run_claudebox_container "$container_name" "interactive" ${control_flags[@]+"${control_flags[@]}"} ${claude_flags[@]+"${claude_flags[@]}"}
+                ;;
+        esac
     fi
 }
 

@@ -10,7 +10,7 @@ readonly USER_ID=$(id -u)
 readonly GROUP_ID=$(id -g)
 
 # Directories and paths
-readonly PROJECT_DIR="$(pwd)"
+PROJECT_DIR="${PROJECT_DIR:-$(pwd)}"
 readonly LINK_TARGET="$HOME/.local/bin/claudebox"
 export CLAUDEBOX_HOME="${HOME}/.claudebox"
 

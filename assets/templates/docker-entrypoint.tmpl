@@ -39,7 +39,7 @@ if [ "$ENABLE_SUDO" != "true" ]; then
     rm -f /etc/sudoers.d/DOCKERUSER
 fi
 
-if [ -n "$CLAUDEBOX_PROJECT_NAME" ]; then
+if [ -n "${CLAUDEBOX_PROJECT_NAME:-}" ]; then
     CONFIG_FILE="/home/DOCKERUSER/.claudebox/profiles.ini"
 
     if command -v uv >/dev/null 2>&1 && [ -f "$CONFIG_FILE" ] && grep -qE 'python|ml|datascience' "$CONFIG_FILE"; then

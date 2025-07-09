@@ -3,7 +3,6 @@ set -euo pipefail
 
 
 if [ "${DISABLE_FIREWALL:-false}" = "true" ]; then
-    echo "Firewall disabled, skipping setup"
     rm -f "$0"
     exit 0
 fi
