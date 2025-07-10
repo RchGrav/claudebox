@@ -159,6 +159,7 @@ run_claudebox_container() {
     fi
     
     # Run the container
+    [[ "$VERBOSE" == "true" ]] && echo "[DEBUG] Docker run command: docker run ${docker_args[*]}" >&2
     docker run "${docker_args[@]}"
     local exit_code=$?
     
@@ -183,7 +184,10 @@ check_container_exists() {
 
 run_docker_build() {
     info "Running docker build..."
-    DOCKER_BUILDKIT=1 docker build \
+    export DOCKER_BUILDKIT=1
+    docker build \
+        --progress=${BUILDKIT_PROGRESS:-auto} \
+        --build-arg BUILDKIT_INLINE_CACHE=1 \
         --build-arg USER_ID="$USER_ID" \
         --build-arg GROUP_ID="$GROUP_ID" \
         --build-arg USERNAME="$DOCKER_USER" \

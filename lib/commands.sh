@@ -60,7 +60,8 @@ show_help() {
   clean                           Menu of cleanup tasks
   create                          Create new authenticated container slot
   slots                           List all container slots
-  slot <number>                   Launch a specific container slot"
+  slot <number>                   Launch a specific container slot
+  open <project>                  Open project by name/hash from anywhere"
     
     if [[ -n "${IMAGE_NAME:-}" ]] && docker image inspect "$IMAGE_NAME" &>/dev/null; then
         # Get Claude's help and blend our additions
@@ -128,7 +129,9 @@ dispatch_command() {
     remove)           _cmd_remove "$@" ;;
     install)          _cmd_install "$@" ;;
     save)             _cmd_save "$@" ;;
-    shell)            _cmd_shell "$@" ;;
+    shell)            
+        [[ "$VERBOSE" == "true" ]] && echo "[DEBUG] Dispatching to _cmd_shell with: $*" >&2
+        _cmd_shell "$@" ;;
     allowlist)        _cmd_allowlist "$@" ;;
     info)             _cmd_info "$@" ;;
     clean)            _cmd_clean "$@" ;;
@@ -139,6 +142,7 @@ dispatch_command() {
     slots)            _cmd_slots "$@" ;;
     slot)             _cmd_slot "$@" ;;
     revoke)           _cmd_revoke "$@" ;;
+    open)             _cmd_open "$@" ;;
     config|mcp|migrate-installer) _cmd_special "$cmd" "$@" ;;
     undo)             _cmd_undo "$@" ;;
     redo)             _cmd_redo "$@" ;;
@@ -433,6 +437,8 @@ _cmd_unlink() {
 }
 
 _cmd_shell() {
+    [[ "$VERBOSE" == "true" ]] && echo "[DEBUG] _cmd_shell called with args: $*" >&2
+    
     # Set up slot variables if not already set
     if [[ -z "${IMAGE_NAME:-}" ]]; then
         local project_folder_name
@@ -490,9 +496,7 @@ _cmd_shell() {
         echo
         
         # Create a named container for admin mode so we can commit it
-        local project_folder_name
-        project_folder_name=$(get_project_folder_name "$PROJECT_DIR")
-        local temp_container="claudebox-shell-${project_folder_name}-$$"
+        local temp_container="claudebox-admin-$$"
         
         # Ensure cleanup runs on any exit (including Ctrl-C)
         cleanup_admin() {
@@ -501,6 +505,9 @@ _cmd_shell() {
         }
         trap cleanup_admin EXIT
         
+        [[ "$VERBOSE" == "true" ]] && echo "[DEBUG] Running admin container with flags: ${shell_flags[*]}" >&2
+        [[ "$VERBOSE" == "true" ]] && echo "[DEBUG] Remaining args after processing: $*" >&2
+        # Don't pass any remaining arguments - only shell and the flags
         run_claudebox_container "$temp_container" "interactive" shell "${shell_flags[@]}"
         
         # Commit changes back to image
@@ -1293,6 +1300,80 @@ _cmd_revoke() {
     
     [[ "$VERBOSE" == "true" ]] && echo "[DEBUG] Exiting _cmd_revoke" >&2
     return 0
+}
+
+_cmd_open() {
+    local search="${1:-}"
+    shift || true
+    
+    if [[ -z "$search" ]]; then
+        error "Usage: claudebox open <project-name> [command...]\nExample: claudebox open myproject\nExample: claudebox open cc618e36 shell"
+    fi
+    
+    # Convert search to lowercase for case-insensitive matching
+    local search_lower=$(echo "$search" | tr '[:upper:]' '[:lower:]')
+    local matches=()
+    
+    # Search through all project directories
+    for parent_dir in "$HOME/.claudebox/projects"/*/ ; do
+        [[ -d "$parent_dir" ]] || continue
+        
+        local dir_name=$(basename "$parent_dir")
+        local dir_lower=$(echo "$dir_name" | tr '[:upper:]' '[:lower:]')
+        
+        # Check if search matches directory name (partial match)
+        if [[ "$dir_lower" == *"$search_lower"* ]]; then
+            # Read the actual project path
+            if [[ -f "$parent_dir/.project_path" ]]; then
+                local project_path=$(cat "$parent_dir/.project_path")
+                matches+=("$project_path|$dir_name")
+            fi
+        fi
+    done
+    
+    # Handle results
+    if [ ${#matches[@]} -eq 0 ]; then
+        error "No projects found matching '$search'"
+    elif [ ${#matches[@]} -eq 1 ]; then
+        # Single match - use it
+        local project_path="${matches[0]%%|*}"
+        local project_name="${matches[0]##*|}"
+        
+        #info "Opening project: $project_name"
+        #info "Path: $project_path"
+        #echo
+        
+        # Save current directory
+        local original_dir="$PWD"
+        
+        # Change to project directory and run claudebox
+        cd "$project_path" || error "Failed to change to project directory"
+        
+        # Set PROJECT_DIR explicitly
+        export PROJECT_DIR="$project_path"
+        
+        # Run claudebox with any additional arguments
+        if [[ $# -eq 0 ]]; then
+            # No arguments - run interactive claude
+            "$SCRIPT_PATH"
+        else
+            # Pass through arguments
+            "$SCRIPT_PATH" "$@"
+        fi
+        
+        # Return to original directory
+        cd "$original_dir"
+    else
+        # Multiple matches - show them
+        error "Multiple projects match '$search':"
+        for match in "${matches[@]}"; do
+            local path="${match%%|*}"
+            local name="${match##*|}"
+            echo "  $name -> $path"
+        done
+        echo
+        echo "Please be more specific."
+    fi
 }
 
 _forward_to_container() {

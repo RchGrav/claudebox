@@ -94,6 +94,9 @@ main() {
     PROJECT_PARENT_DIR=$(get_parent_dir "$PROJECT_DIR")
     export PROJECT_PARENT_DIR
 
+    # Always update args to remove --verbose and rebuild
+    set -- "${new_args[@]}"
+    
     if [[ "$found_rebuild" == "true" ]]; then
         # Get image name for rebuild
         IMAGE_NAME=$(get_image_name)
@@ -101,7 +104,6 @@ main() {
         warn "Rebuilding ClaudeBox Docker image..."
         # Don't use --no-cache to keep layer caching for fast rebuilds
         # export CLAUDEBOX_NO_CACHE=true
-        set -- "${new_args[@]}"
     fi
 
     # Initialize project directory (creates parent with profiles.ini)
@@ -111,7 +113,7 @@ main() {
 
     # First, handle commands that don't require Docker image
     case "${1:-}" in
-        profiles|projects|profile|add|remove|save|install|unlink|allowlist|clean|undo|redo|info|slots|slot|revoke|create|help|-h|--help)
+        profiles|projects|profile|add|remove|save|install|unlink|allowlist|clean|undo|redo|info|slots|revoke|create|open|help|-h|--help)
             # These will be handled by dispatch_command
             dispatch_command "$@"
             local dispatch_exit=$?
@@ -147,7 +149,7 @@ main() {
 
             # Check if Docker image exists for commands that require it (skip if rebuilding or default command)
             # Allow create command to trigger build
-            if [[ "${1:-}" != "" ]] && [[ "${1:-}" != "create" ]] && [[ "${CLAUDEBOX_NO_CACHE:-}" != "true" ]] && [[ ! -f /.dockerenv ]] && ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
+            if [[ "${1:-}" != "" ]] && [[ "${1:-}" != "create" ]] && [[ "${1:-}" != "slot" ]] && [[ "${CLAUDEBOX_NO_CACHE:-}" != "true" ]] && [[ ! -f /.dockerenv ]] && ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
                 error "ClaudeBox image not found.\nRun ${GREEN}claudebox${NC} first to build the image."
             fi
             ;;
@@ -275,6 +277,7 @@ main() {
                 # Copy static build files from templates
                 cp "${SCRIPT_DIR}/assets/templates/docker-entrypoint.tmpl" "$build_context/docker-entrypoint.sh" || error "Failed to copy docker-entrypoint.sh"
                 cp "${SCRIPT_DIR}/assets/templates/init-firewall.tmpl" "$build_context/init-firewall" || error "Failed to copy init-firewall"
+                cp "${SCRIPT_DIR}/assets/templates/dockerignore.tmpl" "$build_context/.dockerignore" || error "Failed to copy .dockerignore"
                 chmod +x "$build_context/docker-entrypoint.sh" "$build_context/init-firewall"
 
                 info "Using git-delta version: $DELTA_VERSION"
@@ -441,9 +444,8 @@ LABEL claudebox.project=\"$project_folder_name\""
     # Using function for Bash 3.2 compatibility
     get_control_flag_priority() {
         case "$1" in
-            "shell") echo 1 ;;
-            "--enable-sudo") echo 2 ;;
-            "--disable-firewall") echo 3 ;;
+            "--enable-sudo") echo 1 ;;
+            "--disable-firewall") echo 2 ;;
             *) echo "" ;;
         esac
     }
@@ -508,6 +510,7 @@ LABEL claudebox.project=\"$project_folder_name\""
         # Check if this is a special command that should be dispatched
         case "${claude_flags[0]:-}" in
             create|shell|config|mcp|migrate-installer|slot|revoke)
+                [[ "$VERBOSE" == "true" ]] && echo "[DEBUG] Dispatching command with claude_flags: ${claude_flags[*]}" >&2
                 dispatch_command "${claude_flags[@]}"
                 exit $?
                 ;;
@@ -517,6 +520,7 @@ LABEL claudebox.project=\"$project_folder_name\""
                 ;;
             *)
                 # Default: run Claude
+                [[ "$VERBOSE" == "true" ]] && echo "[DEBUG] Default case: running container with claude_flags: ${claude_flags[*]}" >&2
                 # Generate container name based on project and slot
                 local slot_name=$(basename "$PROJECT_CLAUDEBOX_DIR")
                 local container_name="claudebox-${project_folder_name}-${slot_name}"

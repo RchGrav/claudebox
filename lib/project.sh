@@ -77,6 +77,8 @@ init_project_dir() {
     [[ -f "$parent/.project_container_counter" ]] || printf '1' > "$parent/.project_container_counter"
     # ensure central profiles.ini
     [[ -f "$parent/profiles.ini" ]] || touch "$parent/profiles.ini"
+    # store project path
+    echo "$path" > "$parent/.project_path"
 }
 
 # Read/write per-project counter with locking
@@ -326,10 +328,14 @@ list_project_slots() {
     echo
     
     if [ $max -eq 0 ]; then
+        echo "Commands:"
+        printf "  %-20s %s\n" "claudebox create" "Create new slot"
+        echo
+        echo "  Hint: Make sure you are in"
+        echo "  a project root folder."
+        echo
         echo "No slots created yet for $path"
         echo
-        echo "Commands:"
-        printf "  %-20s %s\n" "claudebox create" "Create new slot (run from project root)"
         return 0
     fi
     
@@ -340,28 +346,46 @@ list_project_slots() {
     printf "  %-20s %s\n" "claudebox revoke all" "Remove all unused slots"
     echo
     
+    echo "Legend: ✔️== authenticated 🔒 = not authenticcated"
+    echo "        💀 = removed | 🟢 = running 🔴 = not running"
+    echo
+    
     echo "Slots for $path:"
     echo
+    
+    # Header
+    printf "  %s %s  %-8s %-10s\n" " " " " "Slot" "Hash ID"
+    printf "  %s %s  %-8s %-10s\n" "──────  " "────" "────────"
     
     for ((idx=1; idx<=max; idx++)); do
         local name=$(generate_container_name "$path" "$idx")
         local dir="$parent/$name"
-        local status="removed"
+        local auth_icon="💀"  # Dead/removed
+        local run_icon="  "  # Empty space for alignment
         
         if [ -d "$dir" ]; then
+            # Check authentication status
+            if [ -f "$dir/.claude/.credentials.json" ]; then
+                auth_icon="✔️"   # Authenticated
+            else
+                auth_icon="🔒"  # Not authenticated
+            fi
+            
             # Check if a container with this slot name is running
             if docker ps --format "{{.Names}}" | grep -q "^claudebox-.*-${name}$"; then
-                status="in use"
+                run_icon="🟢"  # Running
             else
-                status="available"
+                run_icon="🔴"  # Not running
             fi
         fi
         
-        printf "  Slot %d: %s\n" "$idx" "$status"
+        printf "  %s %s  Slot %-2d  %s\n" "$auth_icon" "$run_icon" "$idx" "$name"
     done
     
     echo
     echo "Total slots: $max"
+    echo "Parent directory: $parent"
+    echo
 }
 
 # Get slot directory by index
