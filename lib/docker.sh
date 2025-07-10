@@ -132,6 +132,46 @@ run_claudebox_container() {
             ;;
     esac
     
+    # Check for tmux socket and mount if available
+    # First check if we're in TMUX mode or if TMUX env var is set
+    if [[ "${CLAUDEBOX_TMUX_MODE:-false}" == "true" ]] || [[ -n "${TMUX:-}" ]]; then
+        local tmux_socket=""
+        
+        # If TMUX env var is set, extract socket path from it
+        if [[ -n "${TMUX:-}" ]]; then
+            # TMUX format is typically: /tmp/tmux-1000/default,23456,0
+            tmux_socket="${TMUX%%,*}"
+        else
+            # Look for default tmux socket location
+            local uid=$(id -u)
+            for socket_dir in "/tmp/tmux-$uid" "/var/run/tmux-$uid" "$HOME/.tmux"; do
+                if [[ -d "$socket_dir" ]]; then
+                    # Find the default socket
+                    for socket in "$socket_dir"/default "$socket_dir"/*; do
+                        if [[ -S "$socket" ]]; then
+                            tmux_socket="$socket"
+                            break
+                        fi
+                    done
+                    [[ -n "$tmux_socket" ]] && break
+                fi
+            done
+        fi
+        
+        # Mount the socket if found
+        if [[ -n "$tmux_socket" ]] && [[ -S "$tmux_socket" ]]; then
+            [[ "$VERBOSE" == "true" ]] && echo "[DEBUG] Mounting tmux socket: $tmux_socket" >&2
+            docker_args+=(-v "$tmux_socket:$tmux_socket")
+            # Also mount the parent directory for tmux to work properly
+            local socket_dir=$(dirname "$tmux_socket")
+            docker_args+=(-v "$socket_dir:$socket_dir")
+            # Pass TMUX env var if available
+            [[ -n "${TMUX:-}" ]] && docker_args+=(-e "TMUX=$TMUX")
+        elif [[ "${CLAUDEBOX_TMUX_MODE:-false}" == "true" ]]; then
+            [[ "$VERBOSE" == "true" ]] && echo "[DEBUG] No tmux socket found, tmux will be available inside container" >&2
+        fi
+    fi
+    
     # Standard configuration for ALL containers
     docker_args+=(
         -w /workspace

@@ -53,3 +53,11 @@ logs/
 .env
 .env.local
 CLAUDE.md
+
+# Test directories
+test_project/
+test_new_project/
+test-project/
+
+# Backlog (local task management)
+backlog/

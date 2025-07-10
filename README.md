@@ -47,6 +47,7 @@ The Ultimate Claude Code Docker Development Environment - Run Claude AI's coding
 - **Python Virtual Environments**: Automatic per-project venv creation with uv
 - **Cross-Platform**: Works on Ubuntu, Debian, Fedora, Arch, and more
 - **Shell Experience**: Powerline zsh with syntax highlighting and autosuggestions
+- **Tmux Integration**: Seamless tmux socket mounting for multi-pane workflows
 
 ## 📋 Prerequisites
 
@@ -215,6 +216,26 @@ claudebox update
 # View/edit firewall allowlist
 claudebox allowlist
 ```
+
+### Tmux Integration
+
+ClaudeBox provides tmux support for multi-pane workflows:
+
+```bash
+# Launch ClaudeBox with tmux support
+claudebox tmux
+
+# If you're already in a tmux session, the socket will be automatically mounted
+# Otherwise, tmux will be available inside the container
+
+# Use tmux commands inside the container:
+# - Create new panes: Ctrl+b % (vertical) or Ctrl+b " (horizontal)
+# - Switch panes: Ctrl+b arrow-keys  
+# - Create new windows: Ctrl+b c
+# - Switch windows: Ctrl+b n/p or Ctrl+b 0-9
+```
+
+ClaudeBox automatically detects and mounts existing tmux sockets from the host, or provides tmux functionality inside the container for powerful multi-context workflows.
 
 ### Task Engine
 

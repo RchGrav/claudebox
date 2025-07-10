@@ -61,7 +61,8 @@ show_help() {
   create                          Create new authenticated container slot
   slots                           List all container slots
   slot <number>                   Launch a specific container slot
-  open <project>                  Open project by name/hash from anywhere"
+  open <project>                  Open project by name/hash from anywhere
+  tmux                            Launch ClaudeBox with tmux support enabled"
     
     if [[ -n "${IMAGE_NAME:-}" ]] && docker image inspect "$IMAGE_NAME" &>/dev/null; then
         # Get Claude's help and blend our additions
@@ -89,7 +90,9 @@ show_help() {
   clean                           Menu of cleanup tasks\
   create                          Create new authenticated container slot\
   slots                           List all container slots\
-  slot <number>                   Launch a specific container slot')
+  slot <number>                   Launch a specific container slot\
+  open <project>                  Open project by name/hash from anywhere\
+  tmux                            Launch ClaudeBox with tmux support enabled')
         
         # Output everything at once
         echo
@@ -143,6 +146,7 @@ dispatch_command() {
     slot)             _cmd_slot "$@" ;;
     revoke)           _cmd_revoke "$@" ;;
     open)             _cmd_open "$@" ;;
+    tmux)             _cmd_tmux "$@" ;;
     config|mcp|migrate-installer) _cmd_special "$cmd" "$@" ;;
     undo)             _cmd_undo "$@" ;;
     redo)             _cmd_redo "$@" ;;
@@ -1195,6 +1199,43 @@ _cmd_slot() {
     
     # Run container with remaining arguments passed to claude
     run_claudebox_container "" "interactive" "$@"
+    exit 0
+}
+
+_cmd_tmux() {
+    # Check if tmux is installed in the host
+    if ! command -v tmux >/dev/null 2>&1; then
+        error "tmux is not installed on the host system.\nPlease install tmux first:\n  Ubuntu/Debian: sudo apt-get install tmux\n  macOS: brew install tmux\n  RHEL/CentOS: sudo yum install tmux"
+    fi
+    
+    # Set up slot variables if not already set
+    if [[ -z "${IMAGE_NAME:-}" ]]; then
+        local project_folder_name
+        project_folder_name=$(get_project_folder_name "$PROJECT_DIR" 2>/dev/null || echo "NONE")
+        
+        if [[ "$project_folder_name" == "NONE" ]]; then
+            error "No container slots available. Please run 'claudebox create' to create a container slot."
+        fi
+        
+        IMAGE_NAME="claudebox-${project_folder_name}"
+        PROJECT_CLAUDEBOX_DIR="$PROJECT_PARENT_DIR/$project_folder_name"
+        export PROJECT_CLAUDEBOX_DIR
+    fi
+    
+    # Generate container name
+    local slot_name=$(basename "$PROJECT_CLAUDEBOX_DIR")
+    local container_name="claudebox-${project_folder_name}-${slot_name}"
+    
+    info "Starting ClaudeBox with tmux support..."
+    echo
+    cecho "Tmux will be available inside the container for multi-pane workflows." "$YELLOW"
+    echo
+    
+    # Export flag to indicate tmux mode
+    export CLAUDEBOX_TMUX_MODE=true
+    
+    # Run the container - tmux socket will be mounted if available
+    run_claudebox_container "$container_name" "interactive" "${@:-shell}"
     exit 0
 }
 
