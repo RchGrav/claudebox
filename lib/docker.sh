@@ -166,6 +166,7 @@ run_claudebox_container() {
             docker_args+=(-v "$socket_dir:$socket_dir")
             # Pass TMUX env var if available
             [[ -n "${TMUX:-}" ]] && docker_args+=(-e "TMUX=$TMUX")
+        fi
     fi
     
     # Standard configuration for ALL containers

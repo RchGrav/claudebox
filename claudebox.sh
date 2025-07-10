@@ -106,9 +106,11 @@ main() {
         # Get image name for rebuild
         IMAGE_NAME=$(get_image_name)
 
-        warn "Rebuilding ClaudeBox Docker image..."
-        # Don't use --no-cache to keep layer caching for fast rebuilds
-        # export CLAUDEBOX_NO_CACHE=true
+        warn "Forcing full rebuild of ClaudeBox Docker image..."
+        # Remove checksum file to force rebuild
+        rm -f "$PROJECT_PARENT_DIR/.docker_layer_checksums"
+        # Remove image to force full rebuild
+        docker rmi -f "$IMAGE_NAME" 2>/dev/null || true
     fi
 
     # Initialize project directory (creates parent with profiles.ini)
@@ -191,25 +193,12 @@ main() {
         fi
     fi
 
-    # Calculate hash of the script itself and profiles.ini
-    local script_hash=$(crc32_file "$SCRIPT_PATH")
-    local build_hash="${script_hash}-${profiles_file_hash}"
-
-    # Check if build files have changed
-    local last_build_hash_file="$HOME/.claudebox/.last_build_hash"
-    if [[ -f "$last_build_hash_file" ]]; then
-        local last_build_hash=$(cat "$last_build_hash_file")
-        if [[ "$build_hash" != "$last_build_hash" ]]; then
-            # Only remove image if IMAGE_NAME is set
-            if [[ -n "${IMAGE_NAME:-}" ]]; then
-                [[ "$VERBOSE" == "true" ]] && echo "[DEBUG] Removing old image: $IMAGE_NAME" >&2
-                docker rmi -f "$IMAGE_NAME" || true
-            fi
-            need_rebuild=true
-        fi
-    else
-        # No hash file means first run or deleted, trigger rebuild
+    # Check if Docker rebuild is needed based on layer checksums
+    if needs_docker_rebuild "$PROJECT_DIR" "$IMAGE_NAME"; then
         need_rebuild=true
+        if [[ "$found_rebuild" != "true" ]]; then
+            info "Detected changes in Docker build files, rebuilding..."
+        fi
     fi
 
     # Only check Docker image for commands that need it
@@ -404,9 +393,8 @@ LABEL claudebox.project=\"$project_folder_name\""
                 # Build the Docker image
                 run_docker_build "$dockerfile" "$build_context"
 
-                # Save build hash
-                mkdir -p "$(dirname "$last_build_hash_file")"
-                echo "$build_hash" > "$last_build_hash_file"
+                # Save layer checksums after successful build
+                save_docker_layer_checksums "$PROJECT_DIR"
                 
                 # Show next steps for first-time users
                 if [[ "$is_first_run" == "true" ]] && [[ "${1:-}" == "" ]]; then
