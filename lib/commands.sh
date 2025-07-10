@@ -146,7 +146,6 @@ dispatch_command() {
     slot)             _cmd_slot "$@" ;;
     revoke)           _cmd_revoke "$@" ;;
     open)             _cmd_open "$@" ;;
-    tmux)             _cmd_tmux "$@" ;;
     config|mcp|migrate-installer) _cmd_special "$cmd" "$@" ;;
     undo)             _cmd_undo "$@" ;;
     redo)             _cmd_redo "$@" ;;
@@ -1235,7 +1234,7 @@ _cmd_tmux() {
     export CLAUDEBOX_TMUX_MODE=true
     
     # Run the container - tmux socket will be mounted if available
-    run_claudebox_container "$container_name" "interactive" "${@:-shell}"
+    run_claudebox_container "$container_name" "interactive" "${@:-}"
     exit 0
 }
 

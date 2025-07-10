@@ -133,8 +133,7 @@ run_claudebox_container() {
     esac
     
     # Check for tmux socket and mount if available
-    # First check if we're in TMUX mode or if TMUX env var is set
-    if [[ "${CLAUDEBOX_TMUX_MODE:-false}" == "true" ]] || [[ -n "${TMUX:-}" ]]; then
+    if [[ -n "${TMUX:-}" ]]; then
         local tmux_socket=""
         
         # If TMUX env var is set, extract socket path from it
@@ -167,9 +166,6 @@ run_claudebox_container() {
             docker_args+=(-v "$socket_dir:$socket_dir")
             # Pass TMUX env var if available
             [[ -n "${TMUX:-}" ]] && docker_args+=(-e "TMUX=$TMUX")
-        elif [[ "${CLAUDEBOX_TMUX_MODE:-false}" == "true" ]]; then
-            [[ "$VERBOSE" == "true" ]] && echo "[DEBUG] No tmux socket found, tmux will be available inside container" >&2
-        fi
     fi
     
     # Standard configuration for ALL containers
@@ -188,6 +184,7 @@ run_claudebox_container() {
         -e "CLAUDEBOX_SLOT_NAME=$(basename "$PROJECT_CLAUDEBOX_DIR")"
         -e "TERM=${TERM:-xterm-256color}"
         -e "VERBOSE=${VERBOSE:-false}"
+        -e "CLAUDEBOX_WRAP_TMUX=${CLAUDEBOX_WRAP_TMUX:-false}"
         --cap-add NET_ADMIN
         --cap-add NET_RAW
         "$IMAGE_NAME"

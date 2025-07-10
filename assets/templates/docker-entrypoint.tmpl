@@ -57,7 +57,11 @@ cd /home/DOCKERUSER
 
 if [[ "${SHELL_MODE:-false}" == "true" ]]; then
     # Use runuser to avoid PTY signal handling issues
-    exec runuser -u DOCKERUSER -- bash -c "source /home/DOCKERUSER/.nvm/nvm.sh && cd /workspace && exec /bin/zsh"
+    if [[ "${CLAUDEBOX_WRAP_TMUX:-false}" == "true" ]]; then
+        exec runuser -u DOCKERUSER -- bash -c "source /home/DOCKERUSER/.nvm/nvm.sh && cd /workspace && exec tmux new-session /bin/zsh"
+    else
+        exec runuser -u DOCKERUSER -- bash -c "source /home/DOCKERUSER/.nvm/nvm.sh && cd /workspace && exec /bin/zsh"
+    fi
 else
     # Claude mode - handle wrapper logic directly here
     if [[ "${1:-}" == "update" ]]; then
@@ -112,10 +116,18 @@ else
             cd /workspace
             
             # If no arguments and stdin is a terminal, run claude in interactive mode
-            if [[ $# -eq 0 ]] && [[ -t 0 ]]; then
-                exec claude
+            if [[ "${CLAUDEBOX_WRAP_TMUX:-false}" == "true" ]]; then
+                if [[ $# -eq 0 ]] && [[ -t 0 ]]; then
+                    exec tmux new-session claude
+                else
+                    exec tmux new-session claude "$@"
+                fi
             else
-                exec claude "$@"
+                if [[ $# -eq 0 ]] && [[ -t 0 ]]; then
+                    exec claude
+                else
+                    exec claude "$@"
+                fi
             fi
         ' -- "$@"
     fi

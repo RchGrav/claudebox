@@ -76,12 +76,17 @@ main() {
     local args=("$@")
     local new_args=()
     local found_rebuild=false
+    local found_tmux=false
 
     for arg in "${args[@]}"; do
         if [[ "$arg" == "rebuild" ]]; then
             found_rebuild=true
         elif [[ "$arg" == "--verbose" ]]; then
             VERBOSE=true
+        elif [[ "$arg" == "tmux" ]]; then
+            # Skip tmux from arguments but remember we saw it
+            found_tmux=true
+            export CLAUDEBOX_WRAP_TMUX=true
         else
             new_args+=("$arg")
         fi
@@ -113,7 +118,7 @@ main() {
 
     # First, handle commands that don't require Docker image
     case "${1:-}" in
-        profiles|projects|profile|add|remove|save|install|unlink|allowlist|clean|undo|redo|info|slots|revoke|create|open|tmux|help|-h|--help)
+        profiles|projects|profile|add|remove|save|install|unlink|allowlist|clean|undo|redo|info|slots|revoke|create|open|help|-h|--help)
             # These will be handled by dispatch_command
             dispatch_command "$@"
             local dispatch_exit=$?
@@ -127,7 +132,7 @@ main() {
 
     # For commands that need Docker, set up slot variables
     case "${1:-}" in
-        shell|update|config|mcp|migrate-installer|create|slot|tmux|help|-h|--help|"")
+        shell|update|config|mcp|migrate-installer|create|slot|help|-h|--help|"")
             # These commands need a slot (help benefits from having one)
             project_folder_name=$(get_project_folder_name "$PROJECT_DIR")
             
@@ -509,7 +514,7 @@ LABEL claudebox.project=\"$project_folder_name\""
     else
         # Check if this is a special command that should be dispatched
         case "${claude_flags[0]:-}" in
-            create|shell|config|mcp|migrate-installer|slot|revoke|tmux)
+            create|shell|config|mcp|migrate-installer|slot|revoke)
                 [[ "$VERBOSE" == "true" ]] && echo "[DEBUG] Dispatching command with claude_flags: ${claude_flags[*]}" >&2
                 dispatch_command "${claude_flags[@]}"
                 exit $?
