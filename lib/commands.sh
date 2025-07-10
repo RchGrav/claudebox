@@ -452,7 +452,7 @@ _cmd_shell() {
             error "No container slots available. Please run 'claudebox create' to create a container slot."
         fi
         
-        IMAGE_NAME="claudebox-${project_folder_name}"
+        IMAGE_NAME=$(get_image_name)
         PROJECT_CLAUDEBOX_DIR="$PROJECT_PARENT_DIR/$project_folder_name"
         export PROJECT_CLAUDEBOX_DIR
     fi
@@ -1217,7 +1217,7 @@ _cmd_tmux() {
             error "No container slots available. Please run 'claudebox create' to create a container slot."
         fi
         
-        IMAGE_NAME="claudebox-${project_folder_name}"
+        IMAGE_NAME=$(get_image_name)
         PROJECT_CLAUDEBOX_DIR="$PROJECT_PARENT_DIR/$project_folder_name"
         export PROJECT_CLAUDEBOX_DIR
     fi
