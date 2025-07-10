@@ -395,12 +395,6 @@ LABEL claudebox.project=\"$project_folder_name\""
 
                 # Save layer checksums after successful build
                 save_docker_layer_checksums "$PROJECT_DIR"
-                
-                # Show next steps for first-time users
-                if [[ "$is_first_run" == "true" ]] && [[ "${1:-}" == "" ]]; then
-                    show_next_steps
-                    exit 0
-                fi
             fi
             ;;
     esac
