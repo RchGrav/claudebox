@@ -332,7 +332,10 @@ RUN GO_VERSION=\"1.21.5\" && \\
                             python)
                                 profile_installations+="
 USER \$USERNAME
-RUN ~/.local/bin/uv pip install --python ~/.venv/bin/python ipython black mypy pylint pytest ruff poetry pipenv
+# Install Python development tools and libraries in unified environment
+RUN ~/.local/bin/uv pip install --python ~/.venv/bin/python \
+    ipython black mypy pylint pytest ruff poetry pipenv \
+    types-requests types-setuptools  # Common type stubs
 USER root"
                                 ;;
                             ml)
