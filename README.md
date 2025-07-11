@@ -57,20 +57,29 @@ The Ultimate Claude Code Docker Development Environment - Run Claude AI's coding
 
 ## 🛠️ Installation
 
-```bash
-# Download and setup ClaudeBox
-curl -O https://raw.githubusercontent.com/RchGrav/claudebox/main/claudebox
-chmod +x claudebox
+### Quick Install (Recommended)
 
-# Run initial setup (handles everything automatically)
-./claudebox
+```bash
+# Download and run the self-extracting installer
+curl -fsSL https://github.com/RchGrav/claudebox/releases/latest/download/claudebox.run.sh | bash
 ```
 
-The script will:
-- ✅ Check for Docker (install if needed)
-- ✅ Configure Docker for non-root usage
-- ✅ Provision a docker container per project
-- ✅ Create a global symlink for easy access
+### Manual Install (Development)
+
+```bash
+# Clone the repository
+git clone https://github.com/RchGrav/claudebox.git
+cd claudebox
+
+# Run the setup script
+./setup.sh
+```
+
+The installer will:
+- ✅ Extract ClaudeBox to `~/.claudebox/scripts/`
+- ✅ Create symlink at `~/.local/bin/claudebox`
+- ✅ Check for Docker (install if needed on first run)
+- ✅ Configure Docker for non-root usage (on first run)
 
 
 ## 📚 Usage
