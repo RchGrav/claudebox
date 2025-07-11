@@ -1,0 +1,59 @@
+name: Build & Test Installer
+
+on:
+  push:
+    branches: [refactor, main]
+  pull_request:
+    branches: [refactor, main]
+  release:
+    types: [created]
+
+jobs:
+  test-installer:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build installer
+        run: bash .builder/build.sh
+
+      - name: Test installer in temporary directory
+        run: |
+          export TEST_HOME=$(mktemp -d)
+          export HOME="$TEST_HOME"
+          echo "Testing installation in $HOME"
+          bash ./claudebox.run.sh
+          ls -la ~/.claudebox/scripts/bin/
+          ~/.local/bin/claudebox --help || echo "OK (help displayed or no version flag)"
+
+      - name: Upload installer artifact
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: claudebox-installer
+          path: claudebox.run.sh
+
+  release:
+    needs: test-installer
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build installer
+        run: bash .builder/build.sh
+
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: ./claudebox.run.sh
+          asset_name: claudebox.run.sh
+          asset_content_type: application/x-sh

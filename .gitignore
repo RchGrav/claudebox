@@ -61,3 +61,6 @@ test-project/
 
 # Backlog (local task management)
 backlog/
+
+# Generated installer
+claudebox.run.sh
