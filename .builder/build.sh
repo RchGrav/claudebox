@@ -26,6 +26,7 @@ tar -czf "$ARCHIVE" "${INCLUDE_PATHS[@]}"
 
 # Combine template + archive into final .run.sh
 echo "🔧 Assembling $OUTPUT..."
+# Append archive directly after template
 cat "$TEMPLATE" "$ARCHIVE" > "$OUTPUT"
 chmod +x "$OUTPUT"
 rm "$ARCHIVE"
