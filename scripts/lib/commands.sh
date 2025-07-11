@@ -486,10 +486,6 @@ _cmd_shell() {
                 ;;
         esac
     done
-
-    echo
-    logo
-    echo
     
     # Run container for shell
     if [[ "$persist_mode" == "true" ]]; then
