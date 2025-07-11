@@ -60,7 +60,7 @@ if [[ "${SHELL_MODE:-false}" == "true" ]]; then
     if [[ "${CLAUDEBOX_WRAP_TMUX:-false}" == "true" ]]; then
         exec runuser -u DOCKERUSER -- bash -c "source /home/DOCKERUSER/.nvm/nvm.sh && cd /workspace && exec tmux new-session /bin/zsh"
     else
-        exec runuser -u DOCKERUSER -- bash -c "source /home/DOCKERUSER/.nvm/nvm.sh && cd /workspace && source /home/DOCKERUSER/.claudebox/commands/common.sh 2>/dev/null && logo_header 2>/dev/null; exec /bin/zsh"
+        exec runuser -u DOCKERUSER -- bash -c "source /home/DOCKERUSER/.nvm/nvm.sh && cd /workspace && source /home/DOCKERUSER/.claudebox/scripts/lib/common.sh 2>/dev/null && logo_header 2>/dev/null; exec /bin/zsh"
     fi
 else
     # Claude mode - handle wrapper logic directly here

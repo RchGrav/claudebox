@@ -37,7 +37,7 @@ update_symlink() {
 # Ensure shared commands folder exists and is up to date
 setup_shared_commands() {
     local shared_commands="$HOME/.claudebox/commands"
-    local script_dir="$(dirname "$SCRIPT_PATH")"
+    local script_dir="$(dirname "$(dirname "$SCRIPT_PATH")")"  # Get scripts/ dir
     local commands_source="$script_dir/commands"
     
     # Create shared commands directory if it doesn't exist
@@ -93,7 +93,7 @@ setup_claude_agent_command() {
 # Calculate checksums for different Docker build layers
 calculate_docker_layer_checksums() {
     local project_dir="${1:-$PROJECT_DIR}"
-    local script_dir="$(dirname "$SCRIPT_PATH")"
+    local script_dir="$(dirname "$(dirname "$SCRIPT_PATH")")"  # Get scripts/ dir
     
     # Layer 1: Base Dockerfile (rarely changes)
     local dockerfile_checksum=""
@@ -107,7 +107,7 @@ calculate_docker_layer_checksums() {
     
     # Layer 2: Entrypoint and init scripts (occasional changes)
     local scripts_checksum=""
-    for file in "$script_dir/assets/templates/docker-entrypoint.tmpl" "$script_dir/assets/templates/init-firewall"; do
+    for file in "$script_dir/assets/templates/docker-entrypoint.tmpl" "$script_dir/assets/templates/init-firewall.tmpl"; do
         if [[ -f "$file" ]]; then
             if command -v md5sum >/dev/null 2>&1; then
                 scripts_checksum+=$(md5sum "$file" 2>/dev/null | cut -d' ' -f1)

@@ -25,8 +25,12 @@ get_script_path() {
 
 readonly SCRIPT_PATH="$(get_script_path)"
 readonly SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
+readonly SCRIPTS_ROOT="$(dirname "$SCRIPT_DIR")"  # scripts/ directory
+readonly INSTALL_ROOT="$HOME/.claudebox"
+readonly SCRIPTS_DIR="$INSTALL_ROOT/scripts"
 export SCRIPT_PATH
 export CLAUDEBOX_SCRIPT_DIR="${SCRIPT_DIR}"
+export SCRIPTS_ROOT
 
 # Parse early flags (--verbose)
 VERBOSE=false
@@ -46,9 +50,18 @@ if [[ -f "$HOME/.claudebox/default-flags" ]]; then
 fi
 
 # --------------------------------------------------------------- source libs --
+# During development, use relative paths. In production, use SCRIPTS_DIR
+if [[ -d "${SCRIPTS_ROOT}/lib" ]]; then
+    # Development mode - running from repo
+    LIB_DIR="${SCRIPTS_ROOT}/lib"
+else
+    # Production mode - running from ~/.claudebox/scripts
+    LIB_DIR="${SCRIPTS_DIR}/lib"
+fi
+
 for lib in common env os state project docker config template commands welcome; do
     # shellcheck disable=SC1090
-    source "${SCRIPT_DIR}/lib/${lib}.sh"
+    source "${LIB_DIR}/${lib}.sh"
 done
 
 # -------------------------------------------------------------------- main() --
@@ -261,7 +274,7 @@ main() {
                 if [[ "$is_first_run" == "true" ]] && [[ "${1:-}" == "" ]]; then
                     show_welcome_screen
                 else
-                    logo
+                    logo_header
                 fi
                 
                 local build_context="$HOME/.claudebox/build"
@@ -269,16 +282,19 @@ main() {
                 local dockerfile="$build_context/Dockerfile"
 
                 # Copy static build files from templates
-                cp "${SCRIPT_DIR}/assets/templates/docker-entrypoint.tmpl" "$build_context/docker-entrypoint.sh" || error "Failed to copy docker-entrypoint.sh"
-                cp "${SCRIPT_DIR}/assets/templates/init-firewall.tmpl" "$build_context/init-firewall" || error "Failed to copy init-firewall"
-                cp "${SCRIPT_DIR}/assets/templates/dockerignore.tmpl" "$build_context/.dockerignore" || error "Failed to copy .dockerignore"
+                local TEMPLATES_DIR="${SCRIPTS_ROOT}/assets/templates"
+                [[ ! -d "$TEMPLATES_DIR" ]] && TEMPLATES_DIR="${SCRIPTS_DIR}/assets/templates"
+                
+                cp "${TEMPLATES_DIR}/docker-entrypoint.tmpl" "$build_context/docker-entrypoint.sh" || error "Failed to copy docker-entrypoint.sh"
+                cp "${TEMPLATES_DIR}/init-firewall.tmpl" "$build_context/init-firewall" || error "Failed to copy init-firewall"
+                cp "${TEMPLATES_DIR}/dockerignore.tmpl" "$build_context/.dockerignore" || error "Failed to copy .dockerignore"
                 chmod +x "$build_context/docker-entrypoint.sh" "$build_context/init-firewall"
 
                 info "Using git-delta version: $DELTA_VERSION"
 
                 # Read the base Dockerfile template
                 local base_dockerfile
-                base_dockerfile=$(cat "${SCRIPT_DIR}/assets/templates/Dockerfile.tmpl") || error "Failed to read base Dockerfile"
+                base_dockerfile=$(cat "${TEMPLATES_DIR}/Dockerfile.tmpl") || error "Failed to read base Dockerfile"
 
                 # Build profile installations section
                 local profile_installations=""
@@ -418,7 +434,7 @@ LABEL claudebox.project=\"$project_folder_name\""
 
     if [[ ! -f "$allowlist_file" ]]; then
         # Copy allowlist template
-        local allowlist_template="${SCRIPT_DIR}/assets/templates/allowlist.tmpl"
+        local allowlist_template="${TEMPLATES_DIR}/allowlist.tmpl"
         if [[ -f "$allowlist_template" ]]; then
             cp "$allowlist_template" "$allowlist_file" || error "Failed to copy allowlist template"
         else
