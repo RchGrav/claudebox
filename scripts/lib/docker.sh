@@ -174,6 +174,7 @@ run_claudebox_container() {
         -w /workspace
         -v "$PROJECT_DIR":/workspace
         -v "$PROJECT_PARENT_DIR":/home/$DOCKER_USER/.claudebox
+        -v "$HOME/.claudebox/scripts":/home/$DOCKER_USER/.claudebox/scripts:ro
         -v "$PROJECT_CLAUDEBOX_DIR/.claude":/home/$DOCKER_USER/.claude
         -v "$PROJECT_CLAUDEBOX_DIR/.claude.json":/home/$DOCKER_USER/.claude.json
         -v "$PROJECT_CLAUDEBOX_DIR/.config":/home/$DOCKER_USER/.config

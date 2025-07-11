@@ -3,10 +3,12 @@ name: Build & Test Installer
 on:
   push:
     branches: [refactor, main]
+    tags:
+      - 'v*'
   pull_request:
     branches: [refactor, main]
   release:
-    types: [created]
+    types: [created, published]
 
 jobs:
   test-installer:

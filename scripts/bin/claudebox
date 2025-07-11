@@ -270,11 +270,9 @@ main() {
                     is_first_run=true
                 fi
                 
-                # Show welcome screen for first-time users
+                # Show welcome screen for first-time users only
                 if [[ "$is_first_run" == "true" ]] && [[ "${1:-}" == "" ]]; then
                     show_welcome_screen
-                else
-                    logo_header
                 fi
                 
                 local build_context="$HOME/.claudebox/build"

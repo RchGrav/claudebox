@@ -59,6 +59,13 @@ The Ultimate Claude Code Docker Development Environment - Run Claude AI's coding
 
 ### Quick Install (Recommended)
 
+Once releases are available:
+```bash
+# Download and run the self-extracting installer
+curl -fsSL https://github.com/RchGrav/claudebox/releases/latest/download/claudebox.run.sh | bash
+```
+
+For now (until release is published):
 ```bash
 # Clone and run the installer
 git clone https://github.com/RchGrav/claudebox.git
@@ -66,8 +73,6 @@ cd claudebox
 bash .builder/build.sh
 bash claudebox.run.sh
 ```
-
-Or for development:
 
 ### Manual Install (Development)
 
