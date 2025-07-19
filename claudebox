@@ -1,6 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Only re-exec with newer bash if current version is too old
+if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
+    echo "Current Bash version is too old (${BASH_VERSION})."
+    # Try to find Homebrew-installed bash
+    BREW_BASH="$(brew --prefix bash 2>/dev/null || true)/bin/bash"
+    
+    if [[ -x "$BREW_BASH" && "$BASH" != "$BREW_BASH" ]]; then
+        echo "Switching to newer Bash: $BREW_BASH"
+        exec "$BREW_BASH" "$0" "$@"
+    else
+        echo "Newer Bash not found, for macOS install with $ brew install bash."
+        sleep 5
+    fi
+fi
+
 # Configuration
 DEFAULT_FLAGS=()
 # readonly IMAGE_NAME="claudebox"  # Now computed per project
