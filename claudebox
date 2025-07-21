@@ -2158,7 +2158,7 @@ DOCKERFILE
 
 # Copy init-firewall script
 COPY --chmod=755 init-firewall /home/$USERNAME/init-firewall
-RUN chown $USERNAME:$USERNAME /home/$USERNAME/init-firewall
+RUN chown $USER_ID:$GROUP_ID /home/$USERNAME/init-firewall
 
 USER $USERNAME
 RUN bash -c "source $NVM_DIR/nvm.sh && claude --version"
