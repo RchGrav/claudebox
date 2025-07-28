@@ -5,7 +5,10 @@
       "Bash(tmux list-windows:*)",
       "Bash(ls:*)",
       "Bash(cat:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(mkdir:*)",
+      "Bash(git checkout:*)",
+      "Bash(git add:*)"
     ]
   },
   "enableAllProjectMcpServers": true,
