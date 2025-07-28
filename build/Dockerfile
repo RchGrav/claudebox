@@ -117,6 +117,9 @@ set -ga terminal-overrides ",xterm-256color:Tc"
 
 set -g mouse on
 set -g history-limit 10000
+
+# Right click to paste from tmux buffer
+bind -n MouseDown3Pane select-pane -t= \; paste-buffer
 EOF
 
 USER root
