@@ -269,6 +269,7 @@ run_claudebox_container() {
         -e "VERBOSE=${VERBOSE:-false}"
         -e "CLAUDEBOX_WRAP_TMUX=${CLAUDEBOX_WRAP_TMUX:-false}"
         -e "PANEID=${CLAUDEBOX_TMUX_PANE:-}"
+        -e "UV_PYTHON_MANAGED=1"
         --cap-add NET_ADMIN
         --cap-add NET_RAW
         "$IMAGE_NAME"
