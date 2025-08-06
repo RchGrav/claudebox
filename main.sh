@@ -585,7 +585,9 @@ LABEL claudebox.project=\"$project_folder_name\""
     
     # Replace placeholders in the project template
     local final_dockerfile="$base_dockerfile"
-    final_dockerfile="${final_dockerfile//\{\{PROFILE_INSTALLATIONS\}\}/$profile_installations}"
+    sanitized_pi="${profile_installations//\\/\\\\}"
+    sanitized_pi="${sanitized_pi//&/\\&}"
+    final_dockerfile="${final_dockerfile//\{\{PROFILE_INSTALLATIONS\}\}/$sanitized_pi}"
     final_dockerfile="${final_dockerfile//\{\{LABELS\}\}/$labels}"
     
     echo "$final_dockerfile" > "$dockerfile"
