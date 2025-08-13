@@ -624,13 +624,14 @@ sync_commands_to_project() {
             mkdir -p "$agents_dir"
             
             # Copy preserving directory structure
-            cd "$agents_source"
-            find . -type f | while read -r file; do
-                local dir=$(dirname "$file")
-                mkdir -p "$agents_dir/$dir"
-                cp "$file" "$agents_dir/$file"
-            done
-            cd - >/dev/null
+            if cd "$agents_source"; then
+                find . -type f | while read -r file; do
+                    local dir=$(dirname "$file")
+                    mkdir -p "$agents_dir/$dir"
+                    cp "$file" "$agents_dir/$file"
+                done
+                cd - >/dev/null
+            fi
             
             # Save checksum
             echo "$agents_checksum" > "$agents_checksum_file"
