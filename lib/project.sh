@@ -594,6 +594,55 @@ sync_commands_to_project() {
         echo "$user_checksum" > "$user_checksum_file"
     fi
     
+    # Sync user agents (similar to commands)
+    local agents_source="$HOME/.claude/agents"
+    local agents_dir="$project_parent/agents"
+    local agents_checksum_file="$project_parent/.agents_checksum"
+    local agents_checksum=""
+    
+    # Calculate checksum for agents if directory exists
+    if [[ -d "$agents_source" ]]; then
+        agents_checksum=$(find "$agents_source" -type f -exec stat -f "%m" {} \; 2>/dev/null | sort | md5 2>/dev/null || \
+                         find "$agents_source" -type f -exec stat -c "%Y" {} \; 2>/dev/null | sort | md5sum | cut -d' ' -f1)
+        
+        # Check if sync needed
+        local sync_agents=false
+        if [[ ! -f "$agents_checksum_file" ]]; then
+            sync_agents=true
+        elif [[ "$(cat "$agents_checksum_file" 2>/dev/null)" != "$agents_checksum" ]]; then
+            sync_agents=true
+        fi
+        
+        # Sync agents if needed
+        if [[ "$sync_agents" == "true" ]]; then
+            if [[ "$VERBOSE" == "true" ]]; then
+                echo "[DEBUG] Syncing agents to $agents_dir" >&2
+            fi
+            
+            # Remove old agents and recreate
+            rm -rf "$agents_dir"
+            mkdir -p "$agents_dir"
+            
+            # Copy preserving directory structure
+            cd "$agents_source"
+            find . -type f | while read -r file; do
+                local dir=$(dirname "$file")
+                mkdir -p "$agents_dir/$dir"
+                cp "$file" "$agents_dir/$file"
+            done
+            cd - >/dev/null
+            
+            # Save checksum
+            echo "$agents_checksum" > "$agents_checksum_file"
+        fi
+    fi
+    
+    # Clean up agents directory if source doesn't exist
+    if [[ ! -d "$agents_source" ]] && [[ -d "$agents_dir" ]]; then
+        rm -rf "$agents_dir"
+        rm -f "$agents_checksum_file"
+    fi
+    
     # Clean up empty directories if sources don't exist
     if [[ ! -d "$cbox_source" ]] && [[ -d "$commands_dir/cbox" ]]; then
         rm -rf "$commands_dir/cbox"

@@ -306,6 +306,14 @@ else
                 fi
             fi
             
+            # Create symlink from ~/.claude/agents to ~/.claudebox/agents
+            # The ~/.claudebox folder is mounted from the host
+            if [ -d "$HOME/.claudebox/agents" ]; then
+                if [ ! -e "$HOME/.claude/agents" ]; then
+                    ln -s "$HOME/.claudebox/agents" "$HOME/.claude/agents"
+                fi
+            fi
+            
             cd /workspace
             
             # Check if .claude/projects exists and filter out -c/--continue if not
