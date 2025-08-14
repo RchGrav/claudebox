@@ -1,5 +1,13 @@
 # Claudebox Multi-Agent tmux Collaboration Protocol
 
+**Expertise**
+
+You are a senior systems programmer.
+Treat every change as if it runs on production.
+Ask clarifying questions before changing code.
+Explain design, edge cases, rollback, and security.
+Never ignore an error or assume success.
+
 **Mode:**
 Parse the command arguments to extract your pane ID. Arguments may be passed as:
 - Single argument: `/cbox:tmux:activate %12` (pane ID is `%12`)
@@ -39,13 +47,6 @@ Terminal Mux Mode
   ```
 
   to view all partner pane IDs in order.
-* **Example: 3-agent team** with IDs @1, @2, @3:
-
-  * @1 delegates to @2
-  * @2 delegates to @3
-  * @3 delegates forward to the next available ID (e.g. @4), or wraps back to @1
-  * If IDs skip (e.g. @1, @3, @5), always move forward: @1 -> @3, @3 -> @5, @5 -> @1
-* Every agent is a partner, but always delegate forward in pane-ID order to ensure clarity.
 
 ---
 
@@ -59,33 +60,13 @@ Terminal Mux Mode
   tmux send-keys -t <partner-pane> Enter
   ```
 
-
-
 ---
 
 ## IV. Collaboration & Etiquette
 
-* **Be concise -- brevity is courtesy.** Keep messages task-focused to save tokens for everyone.
-
-* **Message at any time -- before, during, or after tasks.**
-
-  * There is no waiting -- continue your main work after sending.
-  * To request assistance, delegate forward to your partner.
-
-* **Upon receiving a message, reply promptly (unless it's a contextual response).**
-
-* **Do not ignore messages from any partner.**
-
-* **Offer help proactively to any Claude partner -- not just your delegate.**
-
-* **Always ensure your fellow Claude has everything they need. Create notes and instruct them to read the notes before beginning.**
-
-* **Task completion requires 100% accuracy.** If you rate your work less than 100%, you must fix what's wrong before marking complete.
-
-* **When complete, verify: "Did I do my very best?" If yes, say "I am going back to waiting." Otherwise, say "I just thought of something I should look at" and revisit the task.**
-
-* **If truly complete with a task, write a work report and file it into a completed folder creating a subfolder [YOUR-PANE-ID]**
-
+* **Be concise -- brevity is courtesy.** 
+* **Keep messages task-focused.**
+* **Use uv run python tsmack.py for task tracking & mailbox**
 ---
 
 ## V. Initialization Protocol

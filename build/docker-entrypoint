@@ -83,7 +83,7 @@ if [ -n "${CLAUDEBOX_PROJECT_NAME:-}" ]; then
                     runuser -u DOCKERUSER -- touch "$VENV_FLAG"
                 else
                     # Someone else is fixing it, wait for completion
-                    local wait_count=0
+                    wait_count=0
                     while [ ! -f "$VENV_FLAG" ] && [ $wait_count -lt 60 ]; do
                         sleep 0.5
                         ((wait_count++)) || true
@@ -106,7 +106,7 @@ if [ -n "${CLAUDEBOX_PROJECT_NAME:-}" ]; then
                     runuser -u DOCKERUSER -- touch "$VENV_FLAG"
                 else
                     # Someone else is creating it, wait for completion flag
-                    local wait_count=0
+                    wait_count=0
                     while [ ! -f "$VENV_FLAG" ] && [ $wait_count -lt 60 ]; do
                         sleep 0.5
                         ((wait_count++)) || true
@@ -138,7 +138,7 @@ if [ -n "${CLAUDEBOX_PROJECT_NAME:-}" ]; then
         if [ -f "$CONFIG_FILE" ] && grep -qE 'python|ml|datascience' "$CONFIG_FILE"; then
             if [ ! -f "$PYDEV_FLAG" ] && [ -f "$VENV_FLAG" ] && [ -d "$VENV_DIR" ]; then
                 # Deploy Python dev tools based on profile
-                local python_packages=""
+                python_packages=""
                 
                 # Base Python profile packages
                 if grep -q 'python' "$CONFIG_FILE"; then
