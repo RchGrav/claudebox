@@ -1,61 +1,54 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# Rust profile for ClaudeBox
 set -euo pipefail
 
-# Check if info argument is provided
-if [ "${1:-}" = "info" ]; then
-    echo "Rust"
-    echo "Rust Development (installed via rustup)"
-    exit 0
-fi
+case "${1:-}" in
+    info)
+        printf '%s|%s\n' "rust" "Rust Development (installed via rustup)"
+        ;;
+    packages)
+        # Rust doesn't need apt packages, installed via rustup
+        printf '%s\n' ""
+        ;;
+    dockerfile)
+        cat << 'EOF'
+# Install Rust via rustup
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
+ENV PATH="/home/claude/.cargo/bin:$PATH"
+ENV RUSTUP_HOME="/home/claude/.rustup"
+ENV CARGO_HOME="/home/claude/.cargo"
 
-# Set Rust installation directories
-export RUSTUP_HOME="$HOME/.claudebox/.rustup"
-export CARGO_HOME="$HOME/.claudebox/.cargo"
-export PATH="$CARGO_HOME/bin:$PATH"
+# Install Rust components
+RUN /home/claude/.cargo/bin/rustup component add rust-src rust-analyzer clippy rustfmt llvm-tools-preview
 
-# Install rustup if not already installed
-if [ ! -f "$CARGO_HOME/bin/rustup" ]; then
-    echo "Installing Rust toolchain..."
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
-fi
-
-# Source the environment
-source "$CARGO_HOME/env"
-
-# Install components
-echo "Installing Rust components..."
-rustup component add rust-src rust-analyzer clippy rustfmt llvm-tools-preview
-
-# Install cargo extensions
-echo "Installing cargo extensions..."
-CARGO_TOOLS=(
-    "cargo-edit"
-    "cargo-watch"
-    "cargo-expand"
-    "cargo-outdated"
-    "cargo-audit"
-    "cargo-deny"
-    "cargo-tree"
-    "cargo-bloat"
-    "cargo-flamegraph"
-    "cargo-tarpaulin"
-    "cargo-criterion"
-    "cargo-release"
-    "cargo-make"
-    "sccache"
-    "bacon"
-    "just"
-    "tokei"
-    "hyperfine"
-)
-
-for tool in "${CARGO_TOOLS[@]}"; do
-    if ! command -v "$tool" >/dev/null 2>&1; then
-        echo "Installing $tool..."
-        cargo install "$tool"
-    else
-        echo "$tool already installed"
-    fi
-done
-
-echo "Rust development environment installed in ~/.claudebox"
+# Install essential cargo tools
+RUN /home/claude/.cargo/bin/cargo install \
+    cargo-edit \
+    cargo-watch \
+    cargo-expand \
+    cargo-outdated \
+    cargo-audit \
+    cargo-deny \
+    cargo-tree \
+    cargo-bloat \
+    cargo-flamegraph \
+    cargo-tarpaulin \
+    cargo-criterion \
+    cargo-release \
+    cargo-make \
+    sccache \
+    bacon \
+    just \
+    tokei \
+    hyperfine
+EOF
+        ;;
+    depends)
+        # Rust benefits from core utilities
+        printf '%s\n' "core"
+        ;;
+    *)
+        printf 'Usage: %s {info|packages|dockerfile|depends}\n' "$0" >&2
+        exit 1
+        ;;
+esac
