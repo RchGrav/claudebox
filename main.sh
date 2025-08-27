@@ -586,22 +586,38 @@ LABEL claudebox.profiles.crc=\"$profiles_file_hash\"
 LABEL claudebox.project=\"$project_folder_name\""
     
     # Replace placeholders in the project template
-    local final_dockerfile="$base_dockerfile"
+    # Process line by line to handle placeholders reliably
+    local final_dockerfile=""
+    local IFS=$'\n'
     
-    # Replace WHOLE lines that contain the placeholders (with optional spaces)
-    local final_dockerfile
-    final_dockerfile=$(awk -v pi="$profile_installations" -v lbs="$labels" '
-    # If the whole line is {{ PROFILE_INSTALLATIONS }}, print injected block and skip
-    /^[[:space:]]*\{\{[[:space:]]*PROFILE_INSTALLATIONS[[:space:]]*\}\}[[:space:]]*$/ { print pi; next }
-    # If the whole line is {{ LABELS }}, print labels block and skip
-    /^[[:space:]]*\{\{[[:space:]]*LABELS[[:space:]]*\}\}[[:space:]]*$/ { print lbs; next }
-    # Otherwise, print the line unchanged
-    { print }
-    ' <<<"$base_dockerfile") || error "Failed to apply Dockerfile substitutions"
+    while IFS= read -r line; do
+        # Check if line contains PROFILE_INSTALLATIONS placeholder
+        if [[ "$line" =~ ^[[:space:]]*\{\{[[:space:]]*PROFILE_INSTALLATIONS[[:space:]]*\}\}[[:space:]]*$ ]]; then
+            # Replace with actual profile installations
+            if [[ -n "$profile_installations" ]]; then
+                final_dockerfile+="$profile_installations"
+                final_dockerfile+=$'\n'
+            fi
+        # Check if line contains LABELS placeholder
+        elif [[ "$line" =~ ^[[:space:]]*\{\{[[:space:]]*LABELS[[:space:]]*\}\}[[:space:]]*$ ]]; then
+            # Replace with actual labels
+            if [[ -n "$labels" ]]; then
+                final_dockerfile+="$labels"
+                final_dockerfile+=$'\n'
+            fi
+        else
+            # Keep the line as is
+            final_dockerfile+="$line"
+            final_dockerfile+=$'\n'
+        fi
+    done <<< "$base_dockerfile"
+    
+    # Remove trailing newline if present
+    final_dockerfile="${final_dockerfile%$'\n'}"
 
     # Guard: ensure no unreplaced placeholders remain
-    if grep -q '{{PROFILE_INSTALLATIONS}}' <<<"$final_dockerfile" grep -q '{{LABELS}}' <<<"$final_dockerfile"; then
-    error "Unreplaced placeholders remain in generated Dockerfile"
+    if grep -q '{{PROFILE_INSTALLATIONS}}' <<<"$final_dockerfile" || grep -q '{{LABELS}}' <<<"$final_dockerfile"; then
+        error "Unreplaced placeholders remain in generated Dockerfile"
     fi
 
     printf '%s' "$final_dockerfile" > "$dockerfile"
