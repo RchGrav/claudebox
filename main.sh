@@ -616,7 +616,7 @@ LABEL claudebox.project=\"$project_folder_name\""
     final_dockerfile="${final_dockerfile%$'\n'}"
 
     # Guard: ensure no unreplaced placeholders remain
-    if grep -q '{{PROFILE_INSTALLATIONS}}' <<<"$final_dockerfile" || grep -q '{{LABELS}}' <<<"$final_dockerfile"; then
+    if grep -qE '{{PROFILE_INSTALLATIONS}}|{{LABELS}}' <<<"$final_dockerfile"; then
         error "Unreplaced placeholders remain in generated Dockerfile"
     fi
 
