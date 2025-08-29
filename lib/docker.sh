@@ -245,8 +245,10 @@ run_claudebox_container() {
     # Mount .env file if it exists in the project directory
     if [[ -f "$PROJECT_DIR/.env" ]]; then
         docker_args+=(-v "$PROJECT_DIR/.env":/workspace/.env:ro)
+        # Also pass the environment variables from the .env file
+        docker_args+=(--env-file "$PROJECT_DIR/.env")
         if [[ "$VERBOSE" == "true" ]]; then
-            echo "[DEBUG] Mounting .env file from project directory" >&2
+            echo "[DEBUG] Mounting and loading .env file from project directory" >&2
         fi
     fi
     
