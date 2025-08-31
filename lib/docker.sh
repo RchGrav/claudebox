@@ -301,10 +301,10 @@ run_claudebox_container() {
                 rm -f "$file"
             fi
         done
-        if [[ -n "$user_mcp_file" ]] && [[ -f "$user_mcp_file" ]]; then
+        if [[ -n "${user_mcp_file:-}" ]] && [[ -f "${user_mcp_file:-}" ]]; then
             rm -f "$user_mcp_file"
         fi
-        if [[ -n "$project_mcp_file" ]] && [[ -f "$project_mcp_file" ]]; then
+        if [[ -n "${project_mcp_file:-}" ]] && [[ -f "${project_mcp_file:-}" ]]; then
             rm -f "$project_mcp_file"
         fi
     }
