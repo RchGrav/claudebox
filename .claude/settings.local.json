@@ -5,7 +5,9 @@
       "Bash(tmux list-windows:*)",
       "Bash(ls:*)",
       "Bash(cat:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(test:*)",
+      "Bash(shellcheck:*)"
     ]
   },
   "enableAllProjectMcpServers": true,
