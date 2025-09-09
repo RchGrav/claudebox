@@ -352,6 +352,7 @@ claudebox rebuild
 ClaudeBox stores data in:
 - `~/.claude/` - Global Claude configuration (mounted read-only)
 - `~/.claudebox/` - Global ClaudeBox data
+- `~/.claudebox/ssh/` - ClaudeBox SSH keys
 - `~/.claudebox/profiles/` - Per-project profile configurations (*.ini files)
 - `~/.claudebox/<project-name>/` - Project-specific data:
   - `.claude/` - Project auth state
@@ -360,6 +361,34 @@ ClaudeBox stores data in:
   - `.config/` - Tool configurations
   - `firewall/allowlist` - Network allowlist
 - Current directory mounted as `/workspace` in container
+
+### SSH Key Configuration
+
+ClaudeBox provides flexible SSH key mounting:
+
+**ClaudeBox SSH Directory (Recommended)**
+- Uses dedicated SSH keys in `~/.claudebox/ssh/`.
+- This directory is mounted **read-write** when it exists
+- Enables persistent `known_hosts` updates
+
+**Default Mode (Backwards Compatible)**
+- Mounts `~/.ssh` as **read-only** by default
+- SSH keys work for cloning and authentication
+- `known_hosts` changes are not persisted between sessions
+
+To set up ClaudeBox SSH directory:
+```bash
+# Create the directory
+mkdir -p ~/.claudebox/ssh
+chmod 700 ~/.claudebox/ssh
+
+# Copy existing SSH config (optional)
+cp ~/.ssh/config ~/.claudebox/ssh/
+cp ~/.ssh/known_hosts ~/.claudebox/ssh/
+
+# Generate a dedicated key for ClaudeBox
+ssh-keygen -t ed25519 -f ~/.claudebox/ssh/id_ed25519 -C "claudebox@$(hostname)"
+```
 
 ### Project-Specific Features
 

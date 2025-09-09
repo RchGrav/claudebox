@@ -239,8 +239,21 @@ run_claudebox_container() {
     # Mount .cache directory
     docker_args+=(-v "$PROJECT_SLOT_DIR/.cache":/home/$DOCKER_USER/.cache)
     
-    # Mount SSH directory
-    docker_args+=(-v "$HOME/.ssh":"/home/$DOCKER_USER/.ssh:ro")
+    # SSH directory mounting
+    # Priority: $CLAUDEBOX_HOME/ssh (r/w) > ~/.ssh (r/o)
+    if [[ -d "$CLAUDEBOX_HOME/ssh" ]] && [[ "$(ls -A "$CLAUDEBOX_HOME/ssh" 2>/dev/null)" ]]; then
+        # ClaudeBox SSH directory exists and has files - mount read-write
+        docker_args+=(-v "$CLAUDEBOX_HOME/ssh:/home/$DOCKER_USER/.ssh")
+        if [[ "$VERBOSE" == "true" ]]; then
+            echo "[DEBUG] Mounting ClaudeBox SSH directory (r/w): $CLAUDEBOX_HOME/ssh" >&2
+        fi
+    elif [[ -d "$HOME/.ssh" ]]; then
+        # Fall back to default SSH directory - mount read-only for security
+        docker_args+=(-v "$HOME/.ssh:/home/$DOCKER_USER/.ssh:ro")
+        if [[ "$VERBOSE" == "true" ]]; then
+            echo "[DEBUG] Mounting default SSH directory (r/o): $HOME/.ssh" >&2
+        fi
+    fi
     
     # Mount .env file if it exists in the project directory
     if [[ -f "$PROJECT_DIR/.env" ]]; then
