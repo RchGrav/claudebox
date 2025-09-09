@@ -242,6 +242,14 @@ run_claudebox_container() {
     # Mount SSH directory
     docker_args+=(-v "$HOME/.ssh":"/home/$DOCKER_USER/.ssh:ro")
     
+    # Mount git config if it exists
+    if [[ -f "$HOME/.gitconfig" ]]; then
+        docker_args+=(-v "$HOME/.gitconfig:/home/$DOCKER_USER/.gitconfig:ro")
+        if [[ "$VERBOSE" == "true" ]]; then
+            echo "[DEBUG] Mounting git config (r/o): $HOME/.gitconfig" >&2
+        fi
+    fi
+    
     # Mount .env file if it exists in the project directory
     if [[ -f "$PROJECT_DIR/.env" ]]; then
         docker_args+=(-v "$PROJECT_DIR/.env":/workspace/.env:ro)
