@@ -59,31 +59,45 @@ if [ -n "${CLAUDEBOX_PROJECT_NAME:-}" ]; then
     if command -v uv >/dev/null 2>&1; then
         # Check if both venv folder and .venv_flag exist
         if [ -d "$VENV_DIR" ] && [ -f "$VENV_FLAG" ]; then
-            # Already set up, just ensure activation in shell rc files
-            for shell_rc in /home/DOCKERUSER/.zshrc /home/DOCKERUSER/.bashrc; do
-                # Add .local/bin to PATH if not already there
-                if ! grep -q "PATH.*\.local/bin" "$shell_rc"; then
-                    echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$shell_rc"
-                fi
-                # Add venv activation if not already there
-                if ! grep -q "source $VENV_DIR/bin/activate" "$shell_rc"; then
-                    echo "if [ -f $VENV_DIR/bin/activate ]; then source $VENV_DIR/bin/activate; fi" >> "$shell_rc"
-                fi
-            done
-        else
+            # Check if the virtual environment Python interpreter is accessible (handles symlink chains)
+            if [ ! -x "$VENV_DIR/bin/python3" ]; then
+                printf 'Virtual environment has broken symlinks, recreating...\n' >&2
+                # Remove flag to trigger recreation
+                rm -f "$VENV_FLAG"
+                rm -f "$PYDEV_FLAG"
+            else
+                # Already set up and working, just ensure activation in shell rc files
+                for shell_rc in /home/DOCKERUSER/.zshrc /home/DOCKERUSER/.bashrc; do
+                    # Add .local/bin to PATH if not already there
+                    if ! grep -q "PATH.*\.local/bin" "$shell_rc"; then
+                        printf 'export PATH="$HOME/.local/bin:$PATH"\n' >> "$shell_rc"
+                    fi
+                    # Add venv activation if not already there
+                    if ! grep -q "source $VENV_DIR/bin/activate" "$shell_rc"; then
+                        printf 'if [ -f %s/bin/activate ]; then source %s/bin/activate; fi\n' "$VENV_DIR" "$VENV_DIR" >> "$shell_rc"
+                    fi
+                done
+            fi
+        fi
+        
+        # If we removed the flag above or never had it, proceed with venv creation/recreation
+        if [ ! -f "$VENV_FLAG" ]; then
             # Check if venv exists but flag is missing (incomplete previous run)
             if [ -d "$VENV_DIR" ] && [ ! -f "$VENV_FLAG" ]; then
                 # Try to acquire lock for recreating corrupted venv
                 if runuser -u DOCKERUSER -- mkdir -p "$(dirname "$VENV_FLAG")" && runuser -u DOCKERUSER -- mkdir "$VENV_FLAG.lock" 2>/dev/null; then
                     # We got the lock, recreate venv with --clear
-                    PATH="/home/DOCKERUSER/.local/bin:$PATH" runuser -u DOCKERUSER -- uv venv --python-preference managed --clear "$VENV_DIR" || true
-                    
-                    # Remove lock and create flag to indicate completion
-                    runuser -u DOCKERUSER -- rmdir "$VENV_FLAG.lock"
-                    runuser -u DOCKERUSER -- touch "$VENV_FLAG"
+                    if PATH="/home/DOCKERUSER/.local/bin:$PATH" runuser -u DOCKERUSER -- uv venv --python-preference managed --clear "$VENV_DIR"; then
+                        # Remove lock and create flag to indicate completion
+                        runuser -u DOCKERUSER -- rmdir "$VENV_FLAG.lock"
+                        runuser -u DOCKERUSER -- touch "$VENV_FLAG"
+                    else
+                        printf 'Warning: Failed to recreate virtual environment\n' >&2
+                        runuser -u DOCKERUSER -- rmdir "$VENV_FLAG.lock"
+                    fi
                 else
                     # Someone else is fixing it, wait for completion
-                    local wait_count=0
+                    wait_count=0
                     while [ ! -f "$VENV_FLAG" ] && [ $wait_count -lt 60 ]; do
                         sleep 0.5
                         ((wait_count++)) || true
@@ -97,16 +111,22 @@ if [ -n "${CLAUDEBOX_PROJECT_NAME:-}" ]; then
                 # Normal case - try to create new venv
                 if runuser -u DOCKERUSER -- mkdir -p "$(dirname "$VENV_FLAG")" && runuser -u DOCKERUSER -- mkdir "$VENV_FLAG.lock" 2>/dev/null; then
                     # We got the lock, create venv if needed
+                    venv_success=true
                     if [ ! -d "$VENV_DIR" ]; then
-                        PATH="/home/DOCKERUSER/.local/bin:$PATH" runuser -u DOCKERUSER -- uv venv --python-preference managed "$VENV_DIR" || true
+                        if ! PATH="/home/DOCKERUSER/.local/bin:$PATH" runuser -u DOCKERUSER -- uv venv --python-preference managed "$VENV_DIR"; then
+                            printf 'Warning: Failed to create virtual environment\n' >&2
+                            venv_success=false
+                        fi
                     fi
                     
-                    # Remove lock and create flag to indicate completion
+                    # Remove lock and create flag only if successful
                     runuser -u DOCKERUSER -- rmdir "$VENV_FLAG.lock"
-                    runuser -u DOCKERUSER -- touch "$VENV_FLAG"
+                    if [ "$venv_success" = "true" ]; then
+                        runuser -u DOCKERUSER -- touch "$VENV_FLAG"
+                    fi
                 else
                     # Someone else is creating it, wait for completion flag
-                    local wait_count=0
+                    wait_count=0
                     while [ ! -f "$VENV_FLAG" ] && [ $wait_count -lt 60 ]; do
                         sleep 0.5
                         ((wait_count++)) || true
@@ -124,11 +144,11 @@ if [ -n "${CLAUDEBOX_PROJECT_NAME:-}" ]; then
                 for shell_rc in /home/DOCKERUSER/.zshrc /home/DOCKERUSER/.bashrc; do
                     # Add .local/bin to PATH if not already there
                     if ! grep -q "PATH.*\.local/bin" "$shell_rc"; then
-                        echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$shell_rc"
+                        printf 'export PATH="$HOME/.local/bin:$PATH"\n' >> "$shell_rc"
                     fi
                     # Add venv activation if not already there
                     if ! grep -q "source $VENV_DIR/bin/activate" "$shell_rc"; then
-                        echo "if [ -f $VENV_DIR/bin/activate ]; then source $VENV_DIR/bin/activate; fi" >> "$shell_rc"
+                        printf 'if [ -f %s/bin/activate ]; then source %s/bin/activate; fi\n' "$VENV_DIR" "$VENV_DIR" >> "$shell_rc"
                     fi
                 done
             fi
@@ -136,9 +156,27 @@ if [ -n "${CLAUDEBOX_PROJECT_NAME:-}" ]; then
 
         # Check if Python profile is added and deploy Python dev tools if needed
         if [ -f "$CONFIG_FILE" ] && grep -qE 'python|ml|datascience' "$CONFIG_FILE"; then
-            if [ ! -f "$PYDEV_FLAG" ] && [ -f "$VENV_FLAG" ] && [ -d "$VENV_DIR" ]; then
+            # Check if we need to install Python dev tools
+            # Install if: flag doesn't exist OR key packages are missing
+            need_install=false
+            if [ ! -f "$PYDEV_FLAG" ]; then
+                need_install=true
+            elif [ -f "$VENV_FLAG" ] && [ -d "$VENV_DIR" ]; then
+                # Check if key packages are actually installed
+                if ! PATH="/home/DOCKERUSER/.local/bin:$PATH" runuser -u DOCKERUSER -- bash -c "
+                    source $VENV_DIR/bin/activate 2>/dev/null
+                    python -c 'import ipython, black' 2>/dev/null
+                " 2>/dev/null; then
+                    printf 'Python dev tools missing, reinstalling...\n' >&2
+                    need_install=true
+                    # Remove stale flag
+                    rm -f "$PYDEV_FLAG"
+                fi
+            fi
+            
+            if [ "$need_install" = "true" ] && [ -f "$VENV_FLAG" ] && [ -d "$VENV_DIR" ]; then
                 # Deploy Python dev tools based on profile
-                local python_packages=""
+                python_packages=""
                 
                 # Base Python profile packages
                 if grep -q 'python' "$CONFIG_FILE"; then
@@ -157,14 +195,14 @@ if [ -n "${CLAUDEBOX_PROJECT_NAME:-}" ]; then
                 
                 # Remove duplicates and install
                 if [ -n "$python_packages" ]; then
-                    PATH="/home/DOCKERUSER/.local/bin:$PATH" runuser -u DOCKERUSER -- bash -c "
+                    if PATH="/home/DOCKERUSER/.local/bin:$PATH" runuser -u DOCKERUSER -- bash -c "
                         source $VENV_DIR/bin/activate
                         uv pip install $python_packages
-                    " || true
-                    
-                    # Create .pydev_flag to indicate Python dev tools are deployed
-                    if [ $? -eq 0 ]; then
+                    "; then
+                        # Create .pydev_flag only if installation succeeded
                         runuser -u DOCKERUSER -- touch "$PYDEV_FLAG"
+                    else
+                        printf 'Warning: Failed to install Python dev tools\n' >&2
                     fi
                 fi
             fi
