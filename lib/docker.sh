@@ -296,17 +296,11 @@ run_claudebox_container() {
     # Set up cleanup trap for temporary MCP config files
     cleanup_mcp_files() {
         local file
-        for file in "${mcp_temp_files[@]}"; do
+        for file in "${mcp_temp_files[@]:-}"; do
             if [[ -f "$file" ]]; then
                 rm -f "$file"
             fi
         done
-        if [[ -n "$user_mcp_file" ]] && [[ -f "$user_mcp_file" ]]; then
-            rm -f "$user_mcp_file"
-        fi
-        if [[ -n "$project_mcp_file" ]] && [[ -f "$project_mcp_file" ]]; then
-            rm -f "$project_mcp_file"
-        fi
     }
     trap cleanup_mcp_files EXIT
     
@@ -315,6 +309,7 @@ run_claudebox_container() {
         user_mcp_file=$(create_mcp_config_file "$HOME/.claude.json" "")
         
         if [[ -n "$user_mcp_file" ]]; then
+            mcp_temp_files+=("$user_mcp_file")
             local user_count=$(jq '.mcpServers | length' "$user_mcp_file" 2>/dev/null || echo "0")
             if [[ "$user_count" -gt 0 ]]; then
                 if [[ "$VERBOSE" == "true" ]]; then
@@ -358,6 +353,7 @@ run_claudebox_container() {
     local project_count=$(jq '.mcpServers | length' "$temp_project_file" 2>/dev/null || echo "0")
     if [[ "$project_count" -gt 0 ]]; then
         project_mcp_file="$temp_project_file"
+        # Note: temp_project_file already added to mcp_temp_files above
         if [[ "$VERBOSE" == "true" ]]; then
             printf "Found %s project MCP servers\n" "$project_count" >&2
         fi
