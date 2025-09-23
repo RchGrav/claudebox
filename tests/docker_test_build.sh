@@ -31,6 +31,20 @@ fi
 
 export PATH="$HOME/.local/bin:$PATH"
 claudebox --help >/dev/null || {
-    echo "claudebox command failed!" >&2
+    echo "claudebox command failed." >&2
     exit 1
 }
+claudebox create >/dev/null || {
+    echo "claudebox create command failed." >&2
+    exit 1
+}
+claudebox slots >/dev/null || {
+    echo "claudebox slots command failed." >&2
+    exit 1
+}
+claudebox projects >/dev/null || {
+    echo "claudebox projects command failed." >&2
+    exit 1
+}
+
+# TODO - use dind to test commands that require docker
