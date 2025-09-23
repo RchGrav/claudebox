@@ -2,52 +2,21 @@
 # Test script for Bash 3.2 compatibility
 # Run this with: bash test_bash32_compat.sh
 
-echo "======================================"
-echo "ClaudeBox Bash 3.2 Compatibility Test"
-echo "======================================"
-echo "Current Bash version: $BASH_VERSION"
-echo
+# Get test directory and source test runner
+TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$TEST_DIR/test_runner.sh"
 
-# Colors (these should work in Bash 3.2)
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
-
-# Test counter
-TESTS_RUN=0
-TESTS_PASSED=0
-
-# Test function
-run_test() {
-    local test_name="$1"
-    local test_cmd="$2"
-    
-    TESTS_RUN=$((TESTS_RUN + 1))
-    echo -n "Test $TESTS_RUN: $test_name... "
-    
-    if eval "$test_cmd" >/dev/null 2>&1; then
-        echo -e "${GREEN}PASS${NC}"
-        TESTS_PASSED=$((TESTS_PASSED + 1))
-        return 0
-    else
-        echo -e "${RED}FAIL${NC}"
-        echo "  Error output:"
-        eval "$test_cmd" 2>&1 | sed 's/^/    /'
-        return 1
-    fi
-}
+# Print header
+print_test_header "ClaudeBox Bash 3.2 Compatibility Test"
 
 # Extract just the profile functions from config.sh
-TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$TEST_DIR")"
 CONFIG_SCRIPT="$ROOT_DIR/lib/config.sh"
 # Extract the profile functions - they start at get_profile_packages and end at profile_exists
 # Include the entire profile_exists function by searching for the next function after it
 PROFILE_FUNCS=$(sed -n '/^get_profile_packages()/,/^expand_profile()/p' "$CONFIG_SCRIPT" | sed '$d')
 
-echo "1. Testing profile functions"
-echo "----------------------------"
+print_section "1. Testing profile functions"
 
 # Test 1: Basic function sourcing
 test_basic_sourcing() {
@@ -131,9 +100,7 @@ test_invalid_profile() {
 }
 run_test "Invalid profile handling" test_invalid_profile
 
-echo
-echo "3. Testing Bash 3.2 specific issues"
-echo "-----------------------------------"
+print_section "3. Testing Bash 3.2 specific issues"
 
 # Test 10: No associative arrays
 test_no_associative_arrays() {
@@ -169,21 +136,6 @@ test_with_set_u() {
 }
 run_test "Functions work with set -u" test_with_set_u
 
-echo
-echo "======================================"
-echo "Test Summary"
-echo "======================================"
-echo "Tests run: $TESTS_RUN"
-echo -e "Tests passed: ${GREEN}$TESTS_PASSED${NC}"
-echo -e "Tests failed: ${RED}$((TESTS_RUN - TESTS_PASSED))${NC}"
-echo
-
-if [[ $TESTS_PASSED -eq $TESTS_RUN ]]; then
-    echo -e "${GREEN}All tests passed! ✓${NC}"
-    echo "The script should work with Bash 3.2"
-    exit 0
-else
-    echo -e "${RED}Some tests failed ✗${NC}"
-    echo "There may be compatibility issues"
-    exit 1
-fi
+# Print summary and exit with appropriate code
+print_test_summary
+exit $?
