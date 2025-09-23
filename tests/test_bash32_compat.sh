@@ -2,12 +2,11 @@
 # Test script for Bash 3.2 compatibility
 # Run this with: bash test_bash32_compat.sh
 
-# Get test directory and source test runner
 TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$TEST_DIR/test_runner.sh"
 
 # Print header
-print_test_header "ClaudeBox Bash 3.2 Compatibility Test"
+print_test_header "ClaudeBox Bash Compatibility Test"
 
 # Extract just the profile functions from config.sh
 ROOT_DIR="$(dirname "$TEST_DIR")"
@@ -57,9 +56,7 @@ test_profile_exists() {
 }
 run_test "profile_exists()" test_profile_exists
 
-echo
-echo "2. Testing usage patterns from main script"
-echo "------------------------------------------"
+print_section "2. Testing usage patterns from main script"
 
 # Test 6: Pattern used in profiles command
 test_profiles_pattern() {

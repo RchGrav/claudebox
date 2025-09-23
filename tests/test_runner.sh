@@ -54,7 +54,6 @@ print_test_header() {
     echo "======================================"
     echo "$title"
     echo "======================================"
-    echo "Current Bash version: $BASH_VERSION"
     echo
 }
 

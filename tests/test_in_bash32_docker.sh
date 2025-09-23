@@ -28,16 +28,26 @@ docker run --rm \
     bash:3.2 \
     bash /workspace/tests/test_bash32_compat.sh
 
+# Clean up the Bash 3.2 image
+echo
+echo "Cleaning up bash:3.2 image..."
+docker rmi bash:3.2 >/dev/null 2>&1 || true
+echo "Test complete."
+
 # Also test with Bash 4+ for comparison
 echo
 echo "=========================================="
 echo "Running same tests in Bash 4+ for comparison..."
 echo "=========================================="
 echo
-bash "$SCRIPT_DIR/test_bash32_compat.sh"
-
-# Clean up the Bash 3.2 image
+echo "Running tests in Bash 4.0..."
 echo
-echo "Cleaning up bash:3.2 image..."
-docker rmi bash:3.2 >/dev/null 2>&1 || true
+docker run --rm \
+    -v "$PARENT_DIR":/workspace \
+    bash:4.0 \
+    bash /workspace/tests/test_bash32_compat.sh
+
+echo
+echo "Cleaning up bash:4.0 image..."
+docker rmi bash:4.0 >/dev/null 2>&1 || true
 echo "Test complete."
