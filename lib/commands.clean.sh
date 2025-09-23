@@ -76,9 +76,9 @@ _cmd_clean() {
                 done
                 
                 # Handle results
-                if [ ${#matches[@]} -eq 0 ]; then
+                if [[ ${#matches[@]} -eq 0 ]]; then
                     error "No project found matching: $search"
-                elif [ ${#matches[@]} -eq 1 ]; then
+                elif [[ ${#matches[@]} -eq 1 ]]; then
                     # Single match - clean it
                     local project_info="${matches[0]}"
                     local project_path="${project_info%|*}"
@@ -101,7 +101,7 @@ _cmd_clean() {
                     
                     if [[ "$choice" == "q" ]] || [[ -z "$choice" ]]; then
                         exit 0
-                    elif [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#matches[@]}" ]; then
+                    elif [[ "$choice" =~ ^[0-9]+$ ]] && [[ "$choice" -ge 1 ]] && [[ "$choice" -le "${#matches[@]}" ]]; then
                         local selected="${matches[$((choice-1))]}"
                         local project_path="${selected%|*}"
                         local project_name="${selected#*|}"

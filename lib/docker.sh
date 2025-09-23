@@ -94,7 +94,7 @@ run_claudebox_container() {
     # Handle "attached" mode - start detached, wait, then attach
     if [[ "$run_mode" == "attached" ]]; then
         # Start detached
-        run_claudebox_container "$container_name" "detached" "${container_args[@]}" >/dev/null
+        run_claudebox_container "$container_name" "detached" "${container_args[@]:+${container_args[@]}}" >/dev/null
         
         # Show progress while container initializes
         fillbar
@@ -296,7 +296,7 @@ run_claudebox_container() {
     # Set up cleanup trap for temporary MCP config files
     cleanup_mcp_files() {
         local file
-        for file in "${mcp_temp_files[@]}"; do
+        for file in "${mcp_temp_files[@]:+${mcp_temp_files[@]}}"; do
             if [[ -f "$file" ]]; then
                 rm -f "$file"
             fi
