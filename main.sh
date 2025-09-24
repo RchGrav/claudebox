@@ -580,28 +580,27 @@ build_docker_image() {
     # Build labels
     local project_folder_name
     project_folder_name=$(generate_parent_folder_name "$PROJECT_DIR")
-    local labels="\
-LABEL claudebox.profiles=\"$profile_hash\"
-LABEL claudebox.profiles.crc=\"$profiles_file_hash\"
-LABEL claudebox.project=\"$project_folder_name\""
-    
-    # Replace placeholders in the project template
+
     local final_dockerfile="$base_dockerfile"
     
-    # Replace WHOLE lines that contain the placeholders (with optional spaces)
-    local final_dockerfile
-    final_dockerfile=$(awk -v pi="$profile_installations" -v lbs="$labels" '
-    # If the whole line is {{ PROFILE_INSTALLATIONS }}, print injected block and skip
-    /^[[:space:]]*\{\{[[:space:]]*PROFILE_INSTALLATIONS[[:space:]]*\}\}[[:space:]]*$/ { print pi; next }
-    # If the whole line is {{ LABELS }}, print labels block and skip
-    /^[[:space:]]*\{\{[[:space:]]*LABELS[[:space:]]*\}\}[[:space:]]*$/ { print lbs; next }
-    # Otherwise, print the line unchanged
-    { print }
-    ' <<<"$base_dockerfile") || error "Failed to apply Dockerfile substitutions"
+    # First replace the profile installations
+    final_dockerfile=$(sed -e "/^[[:space:]]*{{[[:space:]]*PROFILE_INSTALLATIONS[[:space:]]*}}[[:space:]]*$/c\\
+$profile_installations" <<<"$final_dockerfile")
+    
+    # Then replace the labels section - each on a separate line
+    final_dockerfile=$(sed -e "/^[[:space:]]*{{[[:space:]]*LABELS[[:space:]]*}}[[:space:]]*$/c\\
+LABEL claudebox.profiles=\"$profile_hash\"\\
+LABEL claudebox.profiles.crc=\"$profiles_file_hash\"\\
+LABEL claudebox.project=\"$project_folder_name\"" <<<"$final_dockerfile")
+    
+    # Check if substitution was successful
+    if [[ $? -ne 0 ]]; then
+        error "Failed to apply Dockerfile substitutions"
+    fi
 
     # Guard: ensure no unreplaced placeholders remain
     if grep -q '{{PROFILE_INSTALLATIONS}}' <<<"$final_dockerfile" grep -q '{{LABELS}}' <<<"$final_dockerfile"; then
-    error "Unreplaced placeholders remain in generated Dockerfile"
+				error "Unreplaced placeholders remain in generated Dockerfile"
     fi
 
     printf '%s' "$final_dockerfile" > "$dockerfile"
