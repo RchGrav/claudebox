@@ -31,7 +31,7 @@ generate_tools_report() {
             if [[ ${#profiles[@]} -gt 0 ]]; then
                 echo "## Active Development Profiles"
                 echo
-                for profile in "${profiles[@]}"; do
+                for profile in "${profiles[@]:-}"; do
                     echo "### $profile"
                     echo
                     _describe_profile "$profile"
@@ -66,7 +66,7 @@ generate_tools_report() {
                 echo
                 echo "The following custom packages have been installed:"
                 echo
-                for package in "${packages[@]}"; do
+                for package in "${packages[@]:-}"; do
                     echo "- $package"
                 done
                 echo

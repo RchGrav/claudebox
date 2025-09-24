@@ -421,7 +421,7 @@ Current directory: $PWD"
     if [[ ${#window_panes[@]} -gt 0 ]]; then
         # Calculate total slots needed
         total_slots_needed=0
-        for panes in "${window_panes[@]}"; do
+        for panes in "${window_panes[@]:-}"; do
             ((total_slots_needed += panes)) || true
         done
         
@@ -558,7 +558,7 @@ Current directory: $PWD"
                     local first_created=false
                     
                     # Create panes one by one, capturing IDs atomically
-                    for panes in "${window_panes[@]}"; do
+                    for panes in "${window_panes[@]:-}"; do
                         for ((i=0; i<panes; i++)); do
                             if [[ $slot_index -ge ${#available_slots[@]} ]]; then
                                 error "Not enough available slots for layout"
@@ -726,7 +726,7 @@ _cmd_project() {
     else
         # Multiple matches - show them
         error "Multiple projects match '$search':"
-        for match in "${matches[@]}"; do
+        for match in "${matches[@]:-}"; do
             local path="${match%%|*}"
             local name="${match##*|}"
             echo "  $name -> $path"
@@ -813,7 +813,7 @@ _cmd_import() {
     cecho "Available commands to import:" "$CYAN"
     echo
     local i=1
-    for cmd in "${commands[@]}"; do
+    for cmd in "${commands[@]:-}"; do
         printf "  %2d. %s\n" "$i" "$cmd"
         ((i++)) || true
     done
@@ -832,7 +832,7 @@ _cmd_import() {
         a|A|all|ALL)
             # Import all commands
             local imported=0
-            for cmd in "${commands[@]}"; do
+            for cmd in "${commands[@]:-}"; do
                 if cp "$host_commands/$cmd" "$project_commands/"; then
                     ((imported++)) || true
                 fi

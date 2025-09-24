@@ -49,7 +49,7 @@ CARGO_TOOLS=(
     "hyperfine"
 )
 
-for tool in "${CARGO_TOOLS[@]}"; do
+for tool in "${CARGO_TOOLS[@]:-}"; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         echo "Installing $tool..."
         cargo install "$tool"

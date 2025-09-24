@@ -130,7 +130,7 @@ read_profile_section() {
         done < <(sed -n "/^\[$section\]/,/^\[/p" "$profile_file" | tail -n +2 | grep -v '^\[')
     fi
 
-    printf '%s\n' "${result[@]}"
+    printf '%s\n' "${result[@]:-}"
 }
 
 update_profile_section() {
@@ -143,13 +143,13 @@ update_profile_section() {
     readarray -t existing_items < <(read_profile_section "$profile_file" "$section")
 
     local all_items=()
-    for item in "${existing_items[@]}"; do
+    for item in "${existing_items[@]:-}"; do
         [[ -n "$item" ]] && all_items+=("$item")
     done
 
-    for item in "${new_items[@]}"; do
+    for item in "${new_items[@]:-}"; do
         local found=false
-        for existing in "${all_items[@]}"; do
+        for existing in "${all_items[@]:-}"; do
             [[ "$existing" == "$item" ]] && found=true && break
         done
         [[ "$found" == "false" ]] && all_items+=("$item")
@@ -169,7 +169,7 @@ update_profile_section() {
         fi
 
         echo "[$section]"
-        for item in "${all_items[@]}"; do
+        for item in "${all_items[@]:-}"; do
             echo "$item"
         done
         echo ""

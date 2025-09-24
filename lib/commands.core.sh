@@ -117,7 +117,7 @@ _cmd_shell() {
             echo "[DEBUG] Remaining args after processing: $*" >&2
         fi
         # Don't pass any remaining arguments - only shell and the flags
-        run_claudebox_container "$temp_container" "interactive" shell "${shell_flags[@]}"
+        run_claudebox_container "$temp_container" "interactive" shell "${shell_flags[@]:-}"
         
         # Commit changes back to image
         fillbar
@@ -127,7 +127,7 @@ _cmd_shell() {
         success "Changes saved to image!"
     else
         # Regular shell mode - just run without committing
-        run_claudebox_container "" "interactive" shell "${shell_flags[@]}"
+        run_claudebox_container "" "interactive" shell "${shell_flags[@]:-}"
     fi
     
     exit 0

@@ -89,7 +89,7 @@ _cmd_clean() {
                     cecho "Multiple projects found matching '$search':" "$YELLOW"
                     echo
                     local i=1
-                    for match in "${matches[@]}"; do
+                    for match in "${matches[@]:-}"; do
                         local path="${match%|*}"
                         local name="${match#*|}"
                         printf "  %d. %s (%s)\n" "$i" "$name" "$path"

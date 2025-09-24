@@ -31,7 +31,7 @@ parse_cli_args() {
     # Single parsing loop - each arg goes into exactly ONE bucket
     local found_script_command=false
     
-    for arg in "${all_args[@]}"; do
+    for arg in "${all_args[@]:-}"; do
         if [[ " ${HOST_ONLY_FLAGS[*]} " == *" $arg "* ]]; then
             # Bucket 1: Host-only flags
             host_flags+=("$arg")
@@ -49,15 +49,15 @@ parse_cli_args() {
     done
     
     # Export results for use by main script
-    export CLI_HOST_FLAGS=("${host_flags[@]}")
-    export CLI_CONTROL_FLAGS=("${control_flags[@]}")
+    export CLI_HOST_FLAGS=("${host_flags[@]:-}")
+    export CLI_CONTROL_FLAGS=("${control_flags[@]:-}")
     export CLI_SCRIPT_COMMAND="$script_command"
-    export CLI_PASS_THROUGH=("${pass_through[@]}")
+    export CLI_PASS_THROUGH=("${pass_through[@]:-}")
 }
 
 # Process host-only flags and set environment variables
 process_host_flags() {
-    for flag in "${CLI_HOST_FLAGS[@]}"; do
+    for flag in "${CLI_HOST_FLAGS[@]:-}"; do
         case "$flag" in
             --verbose)
                 export VERBOSE=true

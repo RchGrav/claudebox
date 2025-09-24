@@ -127,7 +127,7 @@ _cmd_add() {
 
     [[ ${#selected[@]} -eq 0 ]] && error "No valid profiles specified\nRun 'claudebox profiles' to see available profiles"
 
-    update_profile_section "$profile_file" "profiles" "${selected[@]}"
+    update_profile_section "$profile_file" "profiles" "${selected[@]:-}"
 
     local all_profiles=()
     local all_profiles=()
@@ -144,7 +144,7 @@ _cmd_add() {
     
     # Check if any Python-related profiles were added
     local python_profiles_added=false
-    for profile in "${selected[@]}"; do
+    for profile in "${selected[@]:-}"; do
         if [[ "$profile" == "python" ]] || [[ "$profile" == "ml" ]] || [[ "$profile" == "datascience" ]]; then
             python_profiles_added=true
             break
@@ -162,7 +162,7 @@ _cmd_add() {
     
     # Only show rebuild message for non-Python profiles
     local needs_rebuild=false
-    for profile in "${selected[@]}"; do
+    for profile in "${selected[@]:-}"; do
         if [[ "$profile" != "python" ]] && [[ "$profile" != "ml" ]] && [[ "$profile" != "datascience" ]]; then
             needs_rebuild=true
             break
@@ -175,7 +175,7 @@ _cmd_add() {
     echo
 
     if [[ ${#remaining[@]} -gt 0 ]]; then
-        set -- "${remaining[@]}"
+        set -- "${remaining[@]:-}"
     fi
 }
 
@@ -231,7 +231,7 @@ _cmd_remove() {
     local python_profiles_removed=false
     for profile in "${current_profiles[@]}"; do
         local keep=true
-        for remove in "${to_remove[@]}"; do
+        for remove in "${to_remove[@]:-}"; do
             if [[ "$profile" == "$remove" ]]; then
                 keep=false
                 # Check if we're removing a Python-related profile
@@ -246,7 +246,7 @@ _cmd_remove() {
     
     # Check if any Python-related profiles remain
     local has_python_profiles=false
-    for profile in "${new_profiles[@]}"; do
+    for profile in "${new_profiles[@]:-}"; do
         if [[ "$profile" == "python" ]] || [[ "$profile" == "ml" ]] || [[ "$profile" == "datascience" ]]; then
             has_python_profiles=true
             break
@@ -275,7 +275,7 @@ _cmd_remove() {
     # Write back the filtered profiles
     {
         echo "[profiles]"
-        for profile in "${new_profiles[@]}"; do
+        for profile in "${new_profiles[@]:-}"; do
             echo "$profile"
         done
         echo ""
