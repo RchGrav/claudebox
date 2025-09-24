@@ -287,8 +287,8 @@ run_claudebox_container() {
         fi
     }
     
-    local user_mcp_file=""
-    local project_mcp_file=""
+    user_mcp_file=""
+    project_mcp_file=""
     
     # Track all temporary MCP files for cleanup
     declare -a mcp_temp_files=()
