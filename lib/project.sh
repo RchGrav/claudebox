@@ -248,15 +248,86 @@ find_inactive_slot() {
 }
 
 # ============================================================================
+# Global Mode Functions
+# ============================================================================
+
+# Check if global mode is enabled
+use_global_mode() {
+    [[ "${GLOBAL_MODE:-false}" == "true" ]]
+}
+
+# Initialize global mode directory structure
+init_global_mode() {
+    local global_dir="$HOME/.claudebox/global"
+
+    # Create global directory structure
+    mkdir -p "$global_dir"
+
+    # Create symlinks to user's home directories
+    # Note: These symlinks are for bookkeeping; actual mounting happens in docker.sh
+    if [[ ! -L "$global_dir/.claude" ]]; then
+        ln -sf "$HOME/.claude" "$global_dir/.claude"
+    fi
+
+    if [[ ! -L "$global_dir/.config" ]]; then
+        ln -sf "$HOME/.config" "$global_dir/.config"
+    fi
+
+    if [[ ! -L "$global_dir/.cache" ]]; then
+        ln -sf "$HOME/.cache" "$global_dir/.cache"
+    fi
+
+    # Create profiles.ini if it doesn't exist
+    [[ -f "$global_dir/profiles.ini" ]] || touch "$global_dir/profiles.ini"
+
+    # Copy common.sh to global directory if it doesn't exist
+    local common_sh_target="$global_dir/common.sh"
+    if [[ ! -f "$common_sh_target" ]]; then
+        local common_sh_source="${CLAUDEBOX_SCRIPT_DIR:-${SCRIPT_DIR}}/lib/common.sh"
+        if [[ -f "$common_sh_source" ]]; then
+            cp "$common_sh_source" "$common_sh_target"
+        fi
+    fi
+}
+
+# Get global mode directory
+get_global_dir() {
+    echo "$HOME/.claudebox/global"
+}
+
+# Get global mode container name (fixed name for global mode)
+get_global_container_name() {
+    echo "global"
+}
+
+# Check if we should use slot-based operations (false for global mode)
+should_use_slots() {
+    if use_global_mode; then
+        return 1  # false - don't use slots
+    else
+        return 0  # true - use slots
+    fi
+}
+
+# ============================================================================
 # Main Functions
 # ============================================================================
 
-# Get the project folder name - returns the next available slot
+# Get the project folder name - returns the next available slot or global container
 get_project_folder_name() {
     local path="$1"
+
+    # Check if global mode is enabled
+    if use_global_mode; then
+        # Initialize global mode and return fixed container name
+        init_global_mode
+        echo "global"
+        return 0
+    fi
+
     # First ensure project is initialized
     init_project_dir "$path"
-    
+
     # Find next available slot
     local slot_name
     if slot_name=$(determine_next_start_container "$path"); then
@@ -269,6 +340,12 @@ get_project_folder_name() {
 
 # Get Docker image name for a specific slot
 get_image_name() {
+    # For global mode, use a fixed image name
+    if use_global_mode; then
+        echo "claudebox-global"
+        return 0
+    fi
+
     local parent_folder_name=$(generate_parent_folder_name "${PROJECT_DIR}")
     printf 'claudebox-%s' "${parent_folder_name}"
 }
@@ -614,6 +691,7 @@ export -f slugify_path generate_container_name generate_parent_folder_name get_p
 export -f init_project_dir init_slot_dir
 export -f read_counter write_counter
 export -f create_container determine_next_start_container find_ready_slot find_inactive_slot
+export -f use_global_mode init_global_mode get_global_dir get_global_container_name should_use_slots
 export -f get_project_folder_name get_image_name _get_project_slug
 export -f get_project_by_path list_all_projects resolve_project_path
 export -f list_project_slots get_slot_dir get_slot_index prune_slot_counter
