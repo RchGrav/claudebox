@@ -256,10 +256,21 @@ main() {
         exit 0
     fi
     
-    # Step 6: Initialize project directory (creates parent with profiles.ini)
-    init_project_dir "$PROJECT_DIR"
-    PROJECT_PARENT_DIR=$(get_parent_dir "$PROJECT_DIR")
-    export PROJECT_PARENT_DIR
+    # Step 6: Handle project vs global mode setup
+    if use_global_mode; then
+        # Global mode: set up global directory structure
+        if [[ "$VERBOSE" == "true" ]]; then
+            echo "[DEBUG] Global mode detected, initializing global configuration..." >&2
+        fi
+        init_global_mode
+        PROJECT_PARENT_DIR=$(get_global_dir)
+        export PROJECT_PARENT_DIR
+    else
+        # Project mode: Initialize project directory (creates parent with profiles.ini)
+        init_project_dir "$PROJECT_DIR"
+        PROJECT_PARENT_DIR=$(get_parent_dir "$PROJECT_DIR")
+        export PROJECT_PARENT_DIR
+    fi
     
     # Step 7: Handle rebuild if requested (will use IMAGE_NAME from step 8)
     local rebuild_requested="${REBUILD:-false}"
@@ -281,9 +292,15 @@ main() {
     IMAGE_NAME=$(get_image_name)
     export IMAGE_NAME
     
-    # Set PROJECT_SLOT_DIR if we have a slot
+    # Set PROJECT_SLOT_DIR if we have a slot (global mode uses "global" as slot name)
     if [[ -n "$project_folder_name" ]] && [[ "$project_folder_name" != "NONE" ]]; then
-        PROJECT_SLOT_DIR="$PROJECT_PARENT_DIR/$project_folder_name"
+        if use_global_mode && [[ "$project_folder_name" == "global" ]]; then
+            # In global mode, the slot directory is the global directory itself
+            PROJECT_SLOT_DIR="$PROJECT_PARENT_DIR"
+        else
+            # Project mode: use slot-specific directory
+            PROJECT_SLOT_DIR="$PROJECT_PARENT_DIR/$project_folder_name"
+        fi
         export PROJECT_SLOT_DIR
     fi
     

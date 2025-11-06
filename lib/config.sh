@@ -97,11 +97,19 @@ expand_profile() {
 
 # -------- Profile file management ---------------------------------------------
 get_profile_file_path() {
-    # Use the parent directory name, not the slot name
-    local parent_name=$(generate_parent_folder_name "$PROJECT_DIR")
-    local parent_dir="$HOME/.claudebox/projects/$parent_name"
-    mkdir -p "$parent_dir"
-    echo "$parent_dir/profiles.ini"
+    # Check if global mode is enabled
+    if use_global_mode; then
+        # Use global profiles file
+        local global_dir="$HOME/.claudebox/global"
+        mkdir -p "$global_dir"
+        echo "$global_dir/profiles.ini"
+    else
+        # Use project-specific profiles file
+        local parent_name=$(generate_parent_folder_name "$PROJECT_DIR")
+        local parent_dir="$HOME/.claudebox/projects/$parent_name"
+        mkdir -p "$parent_dir"
+        echo "$parent_dir/profiles.ini"
+    fi
 }
 
 read_config_value() {
@@ -177,15 +185,22 @@ update_profile_section() {
 }
 
 get_current_profiles() {
-    local profiles_file="${PROJECT_PARENT_DIR:-$HOME/.claudebox/projects/$(generate_parent_folder_name "$PWD")}/profiles.ini"
+    local profiles_file
     local current_profiles=()
-    
+
+    # Check if global mode is enabled
+    if use_global_mode; then
+        profiles_file="$HOME/.claudebox/global/profiles.ini"
+    else
+        profiles_file="${PROJECT_PARENT_DIR:-$HOME/.claudebox/projects/$(generate_parent_folder_name "$PWD")}/profiles.ini"
+    fi
+
     if [[ -f "$profiles_file" ]]; then
         while IFS= read -r line; do
             [[ -n "$line" ]] && current_profiles+=("$line")
         done < <(read_profile_section "$profiles_file" "profiles")
     fi
-    
+
     printf '%s\n' "${current_profiles[@]}"
 }
 

@@ -218,26 +218,45 @@ run_claudebox_container() {
     docker_args+=(
         -w /workspace
         -v "$PROJECT_DIR":/workspace
-        -v "$PROJECT_PARENT_DIR":/home/$DOCKER_USER/.claudebox
     )
-    
-    # Ensure .claude directory exists
-    if [[ ! -d "$PROJECT_SLOT_DIR/.claude" ]]; then
-        mkdir -p "$PROJECT_SLOT_DIR/.claude"
+
+    # Handle mounting based on global mode
+    if use_global_mode; then
+        # Global mode: Mount user's home directories directly
+        docker_args+=(-v "$HOME/.claudebox":/home/$DOCKER_USER/.claudebox)
+        docker_args+=(-v "$HOME/.claude":/home/$DOCKER_USER/.claude)
+        docker_args+=(-v "$HOME/.config":/home/$DOCKER_USER/.config)
+        docker_args+=(-v "$HOME/.cache":/home/$DOCKER_USER/.cache)
+
+        if [[ "$VERBOSE" == "true" ]]; then
+            echo "[DEBUG] Global mode: mounting user's home directories directly" >&2
+        fi
+    else
+        # Project mode: Mount project-specific slot directories
+        docker_args+=(-v "$PROJECT_PARENT_DIR":/home/$DOCKER_USER/.claudebox)
+
+        # Ensure .claude directory exists
+        if [[ ! -d "$PROJECT_SLOT_DIR/.claude" ]]; then
+            mkdir -p "$PROJECT_SLOT_DIR/.claude"
+        fi
+
+        docker_args+=(-v "$PROJECT_SLOT_DIR/.claude":/home/$DOCKER_USER/.claude)
+
+        # Mount .claude.json only if it already exists (from previous session)
+        if [[ -f "$PROJECT_SLOT_DIR/.claude.json" ]]; then
+            docker_args+=(-v "$PROJECT_SLOT_DIR/.claude.json":/home/$DOCKER_USER/.claude.json)
+        fi
+
+        # Mount .config directory
+        docker_args+=(-v "$PROJECT_SLOT_DIR/.config":/home/$DOCKER_USER/.config)
+
+        # Mount .cache directory
+        docker_args+=(-v "$PROJECT_SLOT_DIR/.cache":/home/$DOCKER_USER/.cache)
+
+        if [[ "$VERBOSE" == "true" ]]; then
+            echo "[DEBUG] Project mode: mounting project slot directories" >&2
+        fi
     fi
-    
-    docker_args+=(-v "$PROJECT_SLOT_DIR/.claude":/home/$DOCKER_USER/.claude)
-    
-    # Mount .claude.json only if it already exists (from previous session)
-    if [[ -f "$PROJECT_SLOT_DIR/.claude.json" ]]; then
-        docker_args+=(-v "$PROJECT_SLOT_DIR/.claude.json":/home/$DOCKER_USER/.claude.json)
-    fi
-    
-    # Mount .config directory
-    docker_args+=(-v "$PROJECT_SLOT_DIR/.config":/home/$DOCKER_USER/.config)
-    
-    # Mount .cache directory
-    docker_args+=(-v "$PROJECT_SLOT_DIR/.cache":/home/$DOCKER_USER/.cache)
     
     # Mount SSH directory
     docker_args+=(-v "$HOME/.ssh":"/home/$DOCKER_USER/.ssh:ro")
@@ -331,49 +350,62 @@ run_claudebox_container() {
         fi
     fi
     
-    # Create project MCP config file by merging project configs
-    # Start with empty config file for merging
-    local temp_project_file=$(mktemp /tmp/claudebox-project-temp-$(date +%s)-$$.json 2>/dev/null || mktemp)
-    mcp_temp_files+=("$temp_project_file")
-    echo '{"mcpServers":{}}' > "$temp_project_file"
-    
-    # Merge shared project settings first
-    local merged_file=""
-    if [[ -f "$PROJECT_DIR/.claude/settings.json" ]]; then
-        merged_file=$(create_mcp_config_file "$PROJECT_DIR/.claude/settings.json" "$temp_project_file")
-        if [[ -n "$merged_file" ]]; then
-            mv "$merged_file" "$temp_project_file"
+    # Handle project MCP configuration (skip in global mode)
+    if ! use_global_mode; then
+        # Create project MCP config file by merging project configs
+        # Start with empty config file for merging
+        local temp_project_file=$(mktemp /tmp/claudebox-project-temp-$(date +%s)-$$.json 2>/dev/null || mktemp)
+        mcp_temp_files+=("$temp_project_file")
+        echo '{"mcpServers":{}}' > "$temp_project_file"
+
+        # Merge shared project settings first
+        local merged_file=""
+        if [[ -f "$PROJECT_DIR/.claude/settings.json" ]]; then
+            merged_file=$(create_mcp_config_file "$PROJECT_DIR/.claude/settings.json" "$temp_project_file")
+            if [[ -n "$merged_file" ]]; then
+                mv "$merged_file" "$temp_project_file"
+            fi
         fi
-    fi
-    
-    # Merge local project settings (highest priority)
-    if [[ -f "$PROJECT_DIR/.claude/settings.local.json" ]]; then
-        merged_file=$(create_mcp_config_file "$PROJECT_DIR/.claude/settings.local.json" "$temp_project_file")
-        if [[ -n "$merged_file" ]]; then
-            mv "$merged_file" "$temp_project_file"
+
+        # Merge local project settings (highest priority)
+        if [[ -f "$PROJECT_DIR/.claude/settings.local.json" ]]; then
+            merged_file=$(create_mcp_config_file "$PROJECT_DIR/.claude/settings.local.json" "$temp_project_file")
+            if [[ -n "$merged_file" ]]; then
+                mv "$merged_file" "$temp_project_file"
+            fi
         fi
-    fi
-    
-    # Check if we have any project servers
-    local project_count=$(jq '.mcpServers | length' "$temp_project_file" 2>/dev/null || echo "0")
-    if [[ "$project_count" -gt 0 ]]; then
-        project_mcp_file="$temp_project_file"
-        if [[ "$VERBOSE" == "true" ]]; then
-            printf "Found %s project MCP servers\n" "$project_count" >&2
-        fi
-        docker_args+=(-v "$project_mcp_file":/tmp/project-mcp-config.json:ro)
-        if [[ "$VERBOSE" == "true" ]]; then
-            echo "[DEBUG] Mounting project MCP configuration file" >&2
+
+        # Check if we have any project servers
+        local project_count=$(jq '.mcpServers | length' "$temp_project_file" 2>/dev/null || echo "0")
+        if [[ "$project_count" -gt 0 ]]; then
+            project_mcp_file="$temp_project_file"
+            if [[ "$VERBOSE" == "true" ]]; then
+                printf "Found %s project MCP servers\n" "$project_count" >&2
+            fi
+            docker_args+=(-v "$project_mcp_file":/tmp/project-mcp-config.json:ro)
+            if [[ "$VERBOSE" == "true" ]]; then
+                echo "[DEBUG] Mounting project MCP configuration file" >&2
+            fi
+        else
+            rm -f "$temp_project_file"
+            project_mcp_file=""
         fi
     else
-        rm -f "$temp_project_file"
-        project_mcp_file=""
+        if [[ "$VERBOSE" == "true" ]]; then
+            echo "[DEBUG] Global mode: skipping project MCP configuration" >&2
+        fi
     fi
     
     
     # Add environment variables
     local project_name=$(basename "$PROJECT_DIR")
     local slot_name=$(basename "$PROJECT_SLOT_DIR")
+
+    # Adjust project_name and slot_name for global mode
+    if use_global_mode; then
+        project_name="global"
+        slot_name="global"
+    fi
     
     # Calculate slot index for hostname
     local slot_index=1  # default if we can't determine

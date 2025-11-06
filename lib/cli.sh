@@ -7,7 +7,7 @@
 # ============================================================================
 
 # Four flag buckets (Bash 3.2 compatible - no associative arrays)
-readonly HOST_ONLY_FLAGS=(--verbose rebuild)
+readonly HOST_ONLY_FLAGS=(--verbose rebuild --global)
 readonly CONTROL_FLAGS=(--enable-sudo --disable-firewall)
 readonly SCRIPT_COMMANDS=(shell create slot slots revoke profiles projects profile info help -h --help add remove install allowlist clean save project tmux kill)
 
@@ -64,6 +64,9 @@ process_host_flags() {
                 ;;
             rebuild)
                 export REBUILD=true
+                ;;
+            --global)
+                export GLOBAL_MODE=true
                 ;;
             tmux)
                 export CLAUDEBOX_WRAP_TMUX=true
