@@ -35,6 +35,7 @@ get_profile_packages() {
         datascience) echo "r-base" ;;
         security) echo "nmap tcpdump wireshark-common netcat-openbsd john hashcat hydra" ;;
         ml) echo "" ;;  # Just cmake needed, comes from build-tools now
+        homebrew) echo "build-essential curl file procps locales" ;;
         *) echo "" ;;
     esac
 }
@@ -62,12 +63,13 @@ get_profile_description() {
         datascience) echo "Data Science (Python, Jupyter, R)" ;;
         security) echo "Security Tools (scanners, crackers, packet tools)" ;;
         ml) echo "Machine Learning (build layer only; Python via uv)" ;;
+        homebrew) echo "Homebrew Package Manager" ;;
         *) echo "" ;;
     esac
 }
 
 get_all_profile_names() {
-    echo "core build-tools shell networking c openwrt rust python go flutter javascript java ruby php database devops web embedded datascience security ml"
+    echo "core build-tools shell networking c openwrt rust python go flutter javascript java ruby php database devops web embedded datascience security ml homebrew"
 }
 
 profile_exists() {
@@ -83,6 +85,7 @@ expand_profile() {
         c) echo "core build-tools c" ;;
         openwrt) echo "core build-tools openwrt" ;;
         ml) echo "core build-tools ml" ;;
+        homebrew) echo "core homebrew" ;;
         rust|go|flutter|python|php|ruby|java|database|devops|web|embedded|datascience|security|javascript)
             echo "core $1"
             ;;
@@ -365,9 +368,27 @@ get_profile_ml() {
     echo "# ML profile uses build-tools for compilation"
 }
 
+get_profile_homebrew() {
+    local packages=$(get_profile_packages "homebrew")
+    if [[ -n "$packages" ]]; then
+        echo "RUN apt-get update && apt-get install -y $packages && apt-get clean"
+    fi
+    cat << 'EOF'
+USER claude
+
+# Homebrew does not publish versioned releases of its install script
+RUN NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+ENV PATH="/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:${PATH}"
+RUN brew --version  # Confirm installation
+
+USER root
+EOF
+}
+
 export -f _read_ini get_profile_packages get_profile_description get_all_profile_names profile_exists expand_profile
 export -f get_profile_file_path read_config_value read_profile_section update_profile_section get_current_profiles
 export -f get_profile_core get_profile_build_tools get_profile_shell get_profile_networking get_profile_c get_profile_openwrt
 export -f get_profile_rust get_profile_python get_profile_go get_profile_flutter get_profile_javascript get_profile_java get_profile_ruby
 export -f get_profile_php get_profile_database get_profile_devops get_profile_web get_profile_embedded get_profile_datascience
-export -f get_profile_security get_profile_ml
+export -f get_profile_security get_profile_ml get_profile_homebrew
+
