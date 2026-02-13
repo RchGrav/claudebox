@@ -271,11 +271,8 @@ EOF
 
 get_profile_javascript() {
     cat << 'EOF'
-RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.3/install.sh | bash
-ENV NVM_DIR="/home/claude/.nvm"
-RUN . $NVM_DIR/nvm.sh && nvm install --lts
 USER claude
-RUN bash -c "source $NVM_DIR/nvm.sh && npm install -g typescript eslint prettier yarn pnpm"
+RUN bash -c "source /home/claude/.nvm/nvm.sh && npm install -g typescript eslint prettier yarn pnpm"
 USER root
 EOF
 }
