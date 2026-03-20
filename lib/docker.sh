@@ -383,6 +383,8 @@ run_claudebox_container() {
     
     docker_args+=(
         -e "NODE_ENV=${NODE_ENV:-production}"
+        -e "ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL:-}"
+        -e "ANTHROPIC_AUTH_TOKEN=${ANTHROPIC_AUTH_TOKEN:-}"
         -e "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}"
         -e "CLAUDEBOX_PROJECT_NAME=$project_name"
         -e "CLAUDEBOX_SLOT_NAME=$slot_name"
