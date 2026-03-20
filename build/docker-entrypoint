@@ -106,7 +106,7 @@ if [ -n "${CLAUDEBOX_PROJECT_NAME:-}" ]; then
                     runuser -u DOCKERUSER -- touch "$VENV_FLAG"
                 else
                     # Someone else is creating it, wait for completion flag
-                    local wait_count=0
+                    wait_count=0
                     while [ ! -f "$VENV_FLAG" ] && [ $wait_count -lt 60 ]; do
                         sleep 0.5
                         ((wait_count++)) || true
