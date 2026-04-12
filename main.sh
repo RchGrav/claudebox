@@ -586,18 +586,17 @@ LABEL claudebox.profiles.crc=\"$profiles_file_hash\"
 LABEL claudebox.project=\"$project_folder_name\""
     
     # Replace placeholders in the project template
-    local final_dockerfile="$base_dockerfile"
-    
-    # Replace WHOLE lines that contain the placeholders (with optional spaces)
-    local final_dockerfile
-    final_dockerfile=$(awk -v pi="$profile_installations" -v lbs="$labels" '
-    # If the whole line is {{ PROFILE_INSTALLATIONS }}, print injected block and skip
-    /^[[:space:]]*\{\{[[:space:]]*PROFILE_INSTALLATIONS[[:space:]]*\}\}[[:space:]]*$/ { print pi; next }
-    # If the whole line is {{ LABELS }}, print labels block and skip
-    /^[[:space:]]*\{\{[[:space:]]*LABELS[[:space:]]*\}\}[[:space:]]*$/ { print lbs; next }
-    # Otherwise, print the line unchanged
-    { print }
-    ' <<<"$base_dockerfile") || error "Failed to apply Dockerfile substitutions"
+    # Uses pure bash to avoid BSD awk issues with multi-line -v values on macOS
+    local final_dockerfile=""
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^[[:space:]]*\{\{[[:space:]]*PROFILE_INSTALLATIONS[[:space:]]*\}\}[[:space:]]*$ ]]; then
+            final_dockerfile+="$profile_installations"$'\n'
+        elif [[ "$line" =~ ^[[:space:]]*\{\{[[:space:]]*LABELS[[:space:]]*\}\}[[:space:]]*$ ]]; then
+            final_dockerfile+="$labels"$'\n'
+        else
+            final_dockerfile+="$line"$'\n'
+        fi
+    done <<<"$base_dockerfile"
 
     # Guard: ensure no unreplaced placeholders remain
     if grep -q '{{PROFILE_INSTALLATIONS}}' <<<"$final_dockerfile" grep -q '{{LABELS}}' <<<"$final_dockerfile"; then

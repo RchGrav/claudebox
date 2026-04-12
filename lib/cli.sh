@@ -7,7 +7,8 @@
 # ============================================================================
 
 # Four flag buckets (Bash 3.2 compatible - no associative arrays)
-readonly HOST_ONLY_FLAGS=(--verbose rebuild)
+# --verbose passes through to claude; use --debug for claudebox debug output
+readonly HOST_ONLY_FLAGS=(--debug rebuild)
 readonly CONTROL_FLAGS=(--enable-sudo --disable-firewall)
 readonly SCRIPT_COMMANDS=(shell create slot slots revoke profiles projects profile info help -h --help add remove install allowlist clean save project tmux kill)
 
@@ -59,7 +60,7 @@ parse_cli_args() {
 process_host_flags() {
     for flag in "${CLI_HOST_FLAGS[@]}"; do
         case "$flag" in
-            --verbose)
+            --debug)
                 export VERBOSE=true
                 ;;
             rebuild)
