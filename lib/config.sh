@@ -122,6 +122,7 @@ read_profile_section() {
     local profile_file="$1"
     local section="$2"
     local result=()
+    local line=""
 
     if [[ -f "$profile_file" ]] && grep -q "^\[$section\]" "$profile_file"; then
         while IFS= read -r line; do
@@ -130,7 +131,7 @@ read_profile_section() {
         done < <(sed -n "/^\[$section\]/,/^\[/p" "$profile_file" | tail -n +2 | grep -v '^\[')
     fi
 
-    printf '%s\n' "${result[@]}"
+    printf '%s\n' "${result[@]+"${result[@]}"}"
 }
 
 update_profile_section() {
@@ -143,13 +144,15 @@ update_profile_section() {
     readarray -t existing_items < <(read_profile_section "$profile_file" "$section")
 
     local all_items=()
-    for item in "${existing_items[@]}"; do
+    local item=""
+    local existing=""
+    for item in "${existing_items[@]+"${existing_items[@]}"}"; do
         [[ -n "$item" ]] && all_items+=("$item")
     done
 
-    for item in "${new_items[@]}"; do
+    for item in "${new_items[@]+"${new_items[@]}"}"; do
         local found=false
-        for existing in "${all_items[@]}"; do
+        for existing in "${all_items[@]+"${all_items[@]}"}"; do
             [[ "$existing" == "$item" ]] && found=true && break
         done
         [[ "$found" == "false" ]] && all_items+=("$item")
@@ -169,7 +172,7 @@ update_profile_section() {
         fi
 
         echo "[$section]"
-        for item in "${all_items[@]}"; do
+        for item in "${all_items[@]+"${all_items[@]}"}"; do
             echo "$item"
         done
         echo ""
@@ -179,14 +182,15 @@ update_profile_section() {
 get_current_profiles() {
     local profiles_file="${PROJECT_PARENT_DIR:-$HOME/.claudebox/projects/$(generate_parent_folder_name "$PWD")}/profiles.ini"
     local current_profiles=()
-    
+    local line=""
+
     if [[ -f "$profiles_file" ]]; then
         while IFS= read -r line; do
             [[ -n "$line" ]] && current_profiles+=("$line")
         done < <(read_profile_section "$profiles_file" "profiles")
     fi
-    
-    printf '%s\n' "${current_profiles[@]}"
+
+    printf '%s\n' "${current_profiles[@]+"${current_profiles[@]}"}"
 }
 
 # -------- Profile installation functions for Docker builds -------------------

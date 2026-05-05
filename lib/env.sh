@@ -13,6 +13,8 @@ readonly GROUP_ID=$(id -g)
 PROJECT_DIR="${PROJECT_DIR:-$(pwd)}"
 readonly LINK_TARGET="$HOME/.local/bin/claudebox"
 export CLAUDEBOX_HOME="${HOME}/.claudebox"
+readonly CLAUDEBOX_GLOBAL_CLAUDE_DIR="${CLAUDEBOX_HOME}/.claude"
+readonly CLAUDEBOX_GLOBAL_CLAUDE_COMMANDS_DIR="${CLAUDEBOX_GLOBAL_CLAUDE_DIR}/commands"
 
 # Version constants
 readonly NODE_VERSION="--lts"
@@ -25,3 +27,5 @@ readonly DELTA_VERSION="0.17.0"
 export USER_ID
 export GROUP_ID
 export PROJECT_DIR
+export CLAUDEBOX_GLOBAL_CLAUDE_DIR
+export CLAUDEBOX_GLOBAL_CLAUDE_COMMANDS_DIR

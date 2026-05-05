@@ -80,7 +80,7 @@ init_project_dir() {
     setup_claude_agent_command "$parent"
     # Sync commands to project
     sync_commands_to_project "$parent"
-    
+
     # Copy common.sh to project parent directory if it doesn't exist
     local common_sh_target="$parent/common.sh"
     if [[ ! -f "$common_sh_target" ]]; then
@@ -109,7 +109,7 @@ write_counter() {
 init_slot_dir() {
     local dir="$1"
     mkdir -p "$dir"
-    
+
     # Check if claude/ directory exists in the claudebox root to seed .claude
     local claude_source="${CLAUDEBOX_SCRIPT_DIR:-${SCRIPT_DIR}}/claude"
     if [[ -d "$claude_source" ]]; then
@@ -119,7 +119,7 @@ init_slot_dir() {
         # Fall back to creating empty .claude directory
         mkdir -p "$dir/.claude"
     fi
-    
+
     mkdir -p "$dir/.config"
     mkdir -p "$dir/.cache"
     # Don't pre-create .claude.json - let Claude create it naturally
@@ -186,7 +186,7 @@ determine_next_start_container() {
         dir="$parent/$name"
         # Skip non-existent slots - they haven't been created yet
         [ -d "$dir" ] || continue
-        
+
         # Check if a container with this slot name is running
         if ! docker ps --format "{{.Names}}" | grep -q "^claudebox-.*-${name}$"; then
             echo "$name"
@@ -201,24 +201,24 @@ find_ready_slot() {
     local path="$1" parent max idx name dir
     parent=$(get_parent_dir "$path")
     max=$(read_counter "$parent")
-    
+
     for ((idx=1; idx<=max; idx++)); do
         name=$(generate_container_name "$path" "$idx")
         dir="$parent/$name"
-        
+
         # Skip non-existent slots
         [ -d "$dir" ] || continue
-        
+
         # Check if authenticated
         [ -f "$dir/.claude/.credentials.json" ] || continue
-        
+
         # Check if not running (inactive)
         if ! docker ps --format "{{.Names}}" | grep -q "^claudebox-.*-${name}$"; then
             echo "$name"
             return 0
         fi
     done
-    
+
     # No ready slots found
     return 1
 }
@@ -228,21 +228,21 @@ find_inactive_slot() {
     local path="$1" parent max idx name dir
     parent=$(get_parent_dir "$path")
     max=$(read_counter "$parent")
-    
+
     for ((idx=1; idx<=max; idx++)); do
         name=$(generate_container_name "$path" "$idx")
         dir="$parent/$name"
-        
+
         # Skip non-existent slots
         [ -d "$dir" ] || continue
-        
+
         # Check if not running (inactive)
         if ! docker ps --format "{{.Names}}" | grep -q "^claudebox-.*-${name}$"; then
             echo "$name"
             return 0
         fi
     done
-    
+
     # No inactive slots found
     return 1
 }
@@ -256,7 +256,7 @@ get_project_folder_name() {
     local path="$1"
     # First ensure project is initialized
     init_project_dir "$path"
-    
+
     # Find next available slot
     local slot_name
     if slot_name=$(determine_next_start_container "$path"); then
@@ -282,14 +282,14 @@ _get_project_slug() {
 get_project_by_path() {
     local search_path="$1"
     local abs_path=$(realpath "$search_path" 2>/dev/null || echo "$search_path")
-    
+
     # Check all parent directories in ~/.claudebox/projects/
     for parent_dir in "$HOME/.claudebox/projects"/*/ ; do
         [[ -d "$parent_dir" ]] || continue
-        
+
         # Check if profiles.ini exists (indicates valid project)
         [[ -f "$parent_dir/profiles.ini" ]] || continue
-        
+
         # For now, we can't easily reverse-lookup the original path
         # This would need to be stored somewhere
         # Return empty for now - this function may need redesign
@@ -301,41 +301,41 @@ get_project_by_path() {
 # List all projects - now shows parent directories with slot info
 list_all_projects() {
     local projects_found=0
-    
+
     # Iterate through parent directories
     for parent_dir in "$HOME/.claudebox/projects"/*/ ; do
         [[ -d "$parent_dir" ]] || continue
         projects_found=1
-        
+
         local parent_name=$(basename "$parent_dir")
         local profiles_file="$parent_dir/profiles.ini"
         local slot_count=0
         local active_slots=0
-        
+
         # Count slots
         if [[ -f "$parent_dir/.project_container_counter" ]]; then
             slot_count=$(read_counter "$parent_dir")
         fi
-        
+
         # Count active slots (with lock files)
         for slot_dir in "$parent_dir"/*/ ; do
             [[ -d "$slot_dir" ]] || continue
             [[ -f "$slot_dir/lock" ]] && ((active_slots++))
         done
-        
+
         # Check if Docker image exists
         local image_name="claudebox-${parent_name}"
         local image_status="❌"
         local image_size="-"
-        
+
         if docker image inspect "$image_name" >/dev/null 2>&1; then
             image_status="✅"
             image_size=$(docker images --filter "reference=$image_name" --format "{{.Size}}")
         fi
-        
+
         printf "%10s  %s  Slots: %d/%d  %s\n" "$image_size" "$image_status" "$active_slots" "$slot_count" "$parent_name"
     done
-    
+
     [[ $projects_found -eq 0 ]] && return 1
     return 0
 }
@@ -343,13 +343,13 @@ list_all_projects() {
 # Resolve project path - adapted for new structure
 resolve_project_path() {
     local input_path="${1:-$PWD}"
-    
+
     # Check if it's already a container name
     if [[ "$input_path" =~ _[a-f0-9]{8}$ ]]; then
         echo "$input_path"
         return 0
     fi
-    
+
     # Otherwise, get the parent directory for this path
     local parent_name=$(get_project_folder_name "$input_path")
     echo "$parent_name"
@@ -365,7 +365,7 @@ prune_slot_counter() {
     local path="$1"
     local parent=$(get_parent_dir "$path")
     local max=$(read_counter "$parent")
-    
+
     # Find highest existing slot
     local highest=0
     for ((idx=1; idx<=max; idx++)); do
@@ -375,7 +375,7 @@ prune_slot_counter() {
             highest=$idx
         fi
     done
-    
+
     # Update counter if we can prune
     if [ $highest -lt $max ]; then
         write_counter "$parent" $highest
@@ -388,19 +388,19 @@ prune_slot_counter() {
 list_project_slots() {
     local path="${1:-$PWD}"
     local parent=$(get_parent_dir "$path")
-    
+
     if [ ! -d "$parent" ]; then
         echo "No project found for path: $path"
         return 1
     fi
-    
+
     # Prune counter first
     prune_slot_counter "$path"
     local max=$(read_counter "$parent")
-    
+
     logo_small
     echo
-    
+
     if [ $max -eq 0 ]; then
         echo "Commands:"
         printf "  %-20s %s\n" "claudebox create" "Create new slot"
@@ -412,7 +412,7 @@ list_project_slots() {
         echo
         return 0
     fi
-    
+
     echo "Commands:"
     echo
     printf "  %-20s %s\n" "claudebox create" "Create new slot"
@@ -420,14 +420,14 @@ list_project_slots() {
     printf "  %-20s %s\n" "claudebox revoke" "Remove highest slot"
     printf "  %-20s %s\n" "claudebox revoke all" "Remove all unused slots"
     echo
-    
+
     echo "Slots for $path:"
     echo
-    
+
     # Header
     printf "  Slot     Authentication       Status     Folder\n"
     printf "  ────   ─────────────────     ─────────  ────────\n"
-    
+
     for ((idx=1; idx<=max; idx++)); do
         local name=$(generate_container_name "$path" "$idx")
         local dir="$parent/$name"
@@ -435,7 +435,7 @@ list_project_slots() {
         local auth_text="Removed"
         local run_icon=""
         local run_text="N/A"
-        
+
         if [ -d "$dir" ]; then
             # Check authentication status
             if [ -f "$dir/.claude/.credentials.json" ]; then
@@ -445,7 +445,7 @@ list_project_slots() {
                 auth_icon="🔒"
                 auth_text="Unauthenticated"
             fi
-            
+
             # Check if a container with this slot name is running
             if docker ps --format "{{.Names}}" | grep -q "^claudebox-.*-${name}$"; then
                 run_icon="🟢"
@@ -455,11 +455,11 @@ list_project_slots() {
                 run_text="Inactive"
             fi
         fi
-        
+
         # Format with 2-space indent
         printf "   %-4s %s %-15s  %s  %-6s  %s\n" "$idx" "$auth_icon" "$auth_text" "$run_icon" "$run_text" "$name"
     done
-    
+
     echo
     echo "Parent directory: $parent"
     echo
@@ -480,7 +480,7 @@ get_slot_index() {
     local parent_dir="$2"
     local path=$(dirname "$parent_dir")  # Get original path from parent
     local max=$(read_counter "$parent_dir")
-    
+
     for ((idx=1; idx<=max; idx++)); do
         local name=$(generate_container_name "$path" "$idx")
         if [[ "$name" == "$slot_name" ]]; then
@@ -498,29 +498,29 @@ sync_commands_to_project() {
     local commands_dir="$project_parent/commands"
     local cbox_checksum_file="$project_parent/.commands_cbox_checksum"
     local user_checksum_file="$project_parent/.commands_user_checksum"
-    
+
     # Source directories
     local cbox_source="${CLAUDEBOX_SCRIPT_DIR:-${SCRIPT_DIR}}/commands"
-    local user_source="$HOME/.claude/commands"
-    
+    local user_source="$CLAUDEBOX_GLOBAL_CLAUDE_COMMANDS_DIR"
+
     # Create commands directory if it doesn't exist
     mkdir -p "$commands_dir"
-    
+
     # Calculate checksums of source directories
     local cbox_checksum=""
     local user_checksum=""
-    
+
     # Get checksum of cbox commands if directory exists
     if [[ -d "$cbox_source" ]]; then
         # Find all files, get their content checksum, sort for consistency
         cbox_checksum=$(find "$cbox_source" -type f -exec sha256sum {} \; 2>/dev/null | sort | sha256sum | cut -d' ' -f1)
     fi
-    
+
     # Get checksum of user commands if directory exists
     if [[ -d "$user_source" ]]; then
         user_checksum=$(find "$user_source" -type f -exec sha256sum {} \; 2>/dev/null | sort | sha256sum | cut -d' ' -f1)
     fi
-    
+
     # Check if cbox commands need syncing
     local sync_cbox=false
     if [[ -d "$cbox_source" ]]; then
@@ -533,7 +533,7 @@ sync_commands_to_project() {
             fi
         fi
     fi
-    
+
     # Check if user commands need syncing
     local sync_user=false
     if [[ -d "$user_source" ]]; then
@@ -546,17 +546,17 @@ sync_commands_to_project() {
             fi
         fi
     fi
-    
+
     # Sync cbox commands
     if [[ "$sync_cbox" == "true" ]] && [[ -d "$cbox_source" ]]; then
         if [[ "$VERBOSE" == "true" ]]; then
             echo "[DEBUG] Syncing cbox commands to $commands_dir/cbox" >&2
         fi
-        
+
         # Remove old cbox commands and recreate
         rm -rf "$commands_dir/cbox"
         mkdir -p "$commands_dir/cbox"
-        
+
         # Copy preserving directory structure
         # Use find to handle subdirectories properly
         if cd "$cbox_source"; then
@@ -567,21 +567,21 @@ sync_commands_to_project() {
             done
             cd - >/dev/null || true
         fi
-        
+
         # Save checksum
         echo "$cbox_checksum" > "$cbox_checksum_file"
     fi
-    
+
     # Sync user commands
     if [[ "$sync_user" == "true" ]] && [[ -d "$user_source" ]]; then
         if [[ "$VERBOSE" == "true" ]]; then
             echo "[DEBUG] Syncing user commands to $commands_dir/user" >&2
         fi
-        
+
         # Remove old user commands and recreate
         rm -rf "$commands_dir/user"
         mkdir -p "$commands_dir/user"
-        
+
         # Copy preserving directory structure
         if cd "$user_source"; then
             find . -type f | while read -r file; do
@@ -591,17 +591,17 @@ sync_commands_to_project() {
             done
             cd - >/dev/null || true
         fi
-        
+
         # Save checksum
         echo "$user_checksum" > "$user_checksum_file"
     fi
-    
+
     # Clean up empty directories if sources don't exist
     if [[ ! -d "$cbox_source" ]] && [[ -d "$commands_dir/cbox" ]]; then
         rm -rf "$commands_dir/cbox"
         rm -f "$cbox_checksum_file"
     fi
-    
+
     if [[ ! -d "$user_source" ]] && [[ -d "$commands_dir/user" ]]; then
         rm -rf "$commands_dir/user"
         rm -f "$user_checksum_file"

@@ -16,8 +16,8 @@ The Ultimate Claude Code Docker Development Environment - Run Claude AI's coding
 
 ██████╗  ██████╗ ██╗  ██╗
 ██╔══██╗██╔═══██╗╚██╗██╔╝
-██████╔╝██║   ██║ ╚███╔╝ 
-██╔══██╗██║   ██║ ██╔██╗ 
+██████╔╝██║   ██║ ╚███╔╝
+██╔══██╗██║   ██║ ██╔██╗
 ██████╔╝╚██████╔╝██╔╝ ██╗
 ╚═════╝  ╚═════╝ ╚═╝  ╚═╝
 ```
@@ -71,6 +71,7 @@ chmod +x claudebox.run
 ```
 
 This will:
+
 - Extract ClaudeBox to `~/.claudebox/source/`
 - Create a symlink at `~/.local/bin/claudebox` (you may need to add `~/.local/bin` to your PATH)
 - Show setup instructions if PATH configuration is needed
@@ -98,6 +99,7 @@ ln -s ~/my-tools/claudebox/main.sh ~/.local/bin/claudebox
 ### Development Installation
 
 For development or testing the latest changes:
+
 ```bash
 # Clone the repository
 git clone https://github.com/RchGrav/claudebox.git
@@ -125,11 +127,11 @@ source ~/.zshrc
 ```
 
 The installer will:
+
 - ✅ Extract ClaudeBox to `~/.claudebox/source/`
 - ✅ Create symlink at `~/.local/bin/claudebox`
 - ✅ Check for Docker (install if needed on first run)
 - ✅ Configure Docker for non-root usage (on first run)
-
 
 ## 📚 Usage
 
@@ -171,6 +173,7 @@ claudebox profile python ml
 ```
 
 Each project maintains its own:
+
 - Docker image (`claudebox-<project-name>`)
 - Language profiles and installed packages
 - Firewall allowlist
@@ -198,15 +201,17 @@ claudebox profile c openwrt       # C/C++ + OpenWRT
 claudebox profile rust go         # Rust + Go
 ```
 
-#### Available Profiles:
+#### Available Profiles
 
 **Core Profiles:**
+
 - **core** - Core Development Utilities (compilers, VCS, shell tools)
 - **build-tools** - Build Tools (CMake, autotools, Ninja)
 - **shell** - Optional Shell Tools (fzf, SSH, man, rsync, file)
 - **networking** - Network Tools (IP stack, DNS, route tools)
 
 **Language Profiles:**
+
 - **c** - C/C++ Development (debuggers, analyzers, Boost, ncurses, cmocka)
 - **rust** - Rust Development (installed via rustup)
 - **python** - Python Development (managed via uv)
@@ -218,6 +223,7 @@ claudebox profile rust go         # Rust + Go
 - **php** - PHP Development (PHP + extensions + Composer)
 
 **Specialized Profiles:**
+
 - **openwrt** - OpenWRT Development (cross toolchain, QEMU, distro tools)
 - **database** - Database Tools (clients for major databases)
 - **devops** - DevOps Tools (Docker, Kubernetes, Terraform, etc.)
@@ -252,6 +258,7 @@ claudebox info
 ```
 
 The info command displays:
+
 - **Current Project**: Path, ID, and data directory
 - **ClaudeBox Installation**: Script location and symlink
 - **Saved CLI Flags**: Your default flags configuration
@@ -289,7 +296,7 @@ claudebox tmux
 
 # Use tmux commands inside the container:
 # - Create new panes: Ctrl+b % (vertical) or Ctrl+b " (horizontal)
-# - Switch panes: Ctrl+b arrow-keys  
+# - Switch panes: Ctrl+b arrow-keys
 # - Create new windows: Ctrl+b c
 # - Switch windows: Ctrl+b n/p or Ctrl+b 0-9
 ```
@@ -350,7 +357,8 @@ claudebox rebuild
 ## 🔧 Configuration
 
 ClaudeBox stores data in:
-- `~/.claude/` - Global Claude configuration (mounted read-only)
+
+- `~/.claudebox/.claude/` - Global Claude configuration and shared commands
 - `~/.claudebox/` - Global ClaudeBox data
 - `~/.claudebox/profiles/` - Per-project profile configurations (*.ini files)
 - `~/.claudebox/<project-name>/` - Project-specific data:
@@ -364,6 +372,7 @@ ClaudeBox stores data in:
 ### Project-Specific Features
 
 Each project automatically gets:
+
 - **Docker Image**: `claudebox-<project-name>` with installed profiles
 - **Profile Configuration**: `~/.claudebox/profiles/<project-name>.ini`
 - **Python Virtual Environment**: `.venv` created with uv when Python profile is active
@@ -378,6 +387,7 @@ Each project automatically gets:
 ## 🏗️ Architecture
 
 ClaudeBox creates a per-project Debian-based Docker image with:
+
 - Node.js (via NVM for version flexibility)
 - Claude Code CLI (@anthropic-ai/claude-code)
 - User account matching host UID/GID
@@ -403,12 +413,15 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## 🐛 Troubleshooting
 
 ### Docker Permission Issues
+
 ClaudeBox automatically handles Docker setup, but if you encounter issues:
+
 1. The script will add you to the docker group
 2. You may need to log out/in or run `newgrp docker`
 3. Run `claudebox` again
 
 ### Profile Installation Failed
+
 ```bash
 # Clean and rebuild for current project
 claudebox clean --project
@@ -417,14 +430,18 @@ claudebox profile <name>
 ```
 
 ### Profile Changes Not Taking Effect
+
 ClaudeBox automatically detects profile changes and rebuilds when needed. If you're having issues:
+
 ```bash
 # Force rebuild
 claudebox rebuild
 ```
 
 ### Python Virtual Environment Issues
+
 ClaudeBox automatically creates a venv when Python profile is active:
+
 ```bash
 # The venv is created at ~/.claudebox/<project>/.venv
 # It's automatically activated in the container
@@ -433,7 +450,9 @@ which python  # Should show the venv python
 ```
 
 ### Can't Find Command
+
 Ensure the symlink was created:
+
 ```bash
 ls -la ~/.local/bin/claudebox
 # Or manually create it
@@ -441,7 +460,9 @@ ln -s /path/to/claudebox ~/.local/bin/claudebox
 ```
 
 ### Multiple Instance Conflicts
+
 Each project has its own Docker image and is fully isolated. To check status:
+
 ```bash
 # Check all ClaudeBox images and containers
 claudebox info
@@ -451,7 +472,9 @@ claudebox clean --project
 ```
 
 ### Build Cache Issues
+
 If builds are slow or failing:
+
 ```bash
 # Clear Docker build cache
 claudebox clean --cache
@@ -474,5 +497,5 @@ Made with ❤️ for developers who love clean, reproducible environments
 
 ## Contact
 
-**Author/Maintainer:** RchGrav  
+**Author/Maintainer:** RchGrav
 **GitHub:** [@RchGrav](https://github.com/RchGrav)

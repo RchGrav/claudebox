@@ -108,8 +108,8 @@ _cmd_info() {
     # Claude Commands
     cecho "📝 Claude Commands" "$WHITE"
     local cmd_count=0
-    if [[ -d "$HOME/.claude/commands" ]]; then
-        cmd_count=$(ls -1 "$HOME/.claude/commands"/*.md 2>/dev/null | wc -l)
+    if [[ -d "$CLAUDEBOX_GLOBAL_CLAUDE_COMMANDS_DIR" ]]; then
+        cmd_count=$(ls -1 "$CLAUDEBOX_GLOBAL_CLAUDE_COMMANDS_DIR"/*.md 2>/dev/null | wc -l)
     fi
     local project_cmd_count=0
     if [[ -e "$PROJECT_PARENT_DIR/commands" ]]; then
@@ -118,8 +118,8 @@ _cmd_info() {
 
     if [[ $cmd_count -gt 0 ]] || [[ $project_cmd_count -gt 0 ]]; then
         echo "   Host:    $cmd_count command(s)"
-        if [[ $cmd_count -gt 0 ]] && [[ -d "$HOME/.claude/commands" ]]; then
-            for cmd_file in "$HOME/.claude/commands"/*.md; do
+        if [[ $cmd_count -gt 0 ]] && [[ -d "$CLAUDEBOX_GLOBAL_CLAUDE_COMMANDS_DIR" ]]; then
+            for cmd_file in "$CLAUDEBOX_GLOBAL_CLAUDE_COMMANDS_DIR"/*.md; do
                 [[ -f "$cmd_file" ]] || continue
                 echo "            - $(basename "$cmd_file" .md)"
             done
@@ -133,7 +133,7 @@ _cmd_info() {
         fi
     else
         echo -e "   ${YELLOW}No custom commands found${NC}"
-        echo -e "   Location: ~/.claude/commands/ (host), project/commands/ (shared)"
+        echo -e "   Location: ~/.claudebox/.claude/commands/ (host), project/commands/ (shared)"
     fi
     echo
 
