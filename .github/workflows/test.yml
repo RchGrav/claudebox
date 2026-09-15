@@ -24,15 +24,15 @@ jobs:
               continue
               ;;
           esac
-          bash "$test_script"
+          /bin/bash "$test_script"
         done
         
     - name: Run Docker shell tests (Linux only)
       if: runner.os == 'Linux'
       run: |
-        bash tests/test_in_bash32_docker.sh
+        /bin/bash tests/test_in_bash32_docker.sh
         if [ -f tests/test_docker_runtime.sh ]; then
-          bash tests/test_docker_runtime.sh
+          /bin/bash tests/test_docker_runtime.sh
         fi
         
   lint:
@@ -77,13 +77,18 @@ jobs:
         TEST_HOME=$(mktemp -d)
         trap 'rm -rf "$TEST_HOME"' EXIT
         export HOME="$TEST_HOME"
-        bash ./dist/claudebox.run profiles
+        /bin/bash ./dist/claudebox.run profiles
         test -f "$HOME/.claudebox/source/main.sh"
         test -L "$HOME/.local/bin/claudebox"
         "$HOME/.local/bin/claudebox" profiles
-        bash "$HOME/.claudebox/source/tests/test_command_sync.sh"
-        bash "$HOME/.claudebox/source/tests/test_docker_runtime.sh"
-        bash "$HOME/.claudebox/source/tests/test_dockerfile_generation.sh"
+        /bin/bash "$HOME/.claudebox/source/tests/test_bash32_compat.sh"
+        /bin/bash "$HOME/.claudebox/source/tests/test_cli_bash32.sh"
+        /bin/bash "$HOME/.claudebox/source/tests/test_command_sync.sh"
+        /bin/bash "$HOME/.claudebox/source/tests/test_docker_runtime.sh"
+        /bin/bash "$HOME/.claudebox/source/tests/test_dockerfile_generation.sh"
+        /bin/bash "$HOME/.claudebox/source/tests/test_runtime_regressions.sh"
+        /bin/bash "$HOME/.claudebox/source/tests/test_profile_download_failure.sh"
+        /bin/bash "$HOME/.claudebox/source/tests/test_dockerfile_template.sh"
         
     - name: Upload installer artifact
       uses: actions/upload-artifact@v4

@@ -62,3 +62,4 @@ tests/test_bash32_compat.sh|info|SC2329|13
 tests/test_bash32_compat.sh|warning|SC2034|1
 tests/test_bash32_compat.sh|warning|SC2155|8
 tests/test_cli_bash32.sh|warning|SC2164|1
+tests/test_runtime_regressions.sh|info|SC2016|1

@@ -42,6 +42,8 @@ if [[ -z "$SHASUM_REAL" ]]; then
     exit 1
 fi
 SHASUM_CALL_LOG="$SANDBOX/shasum calls"
+# The stub intentionally expands these variables when the generated script runs.
+# shellcheck disable=SC2016
 printf '#!/usr/bin/env bash\nprintf "shasum %%s\\n" "$*" >> "$SHASUM_CALL_LOG"\nexec "$SHASUM_REAL" "$@"\n' > "$BIN_DIR/shasum"
 chmod +x "$BIN_DIR/shasum"
 
@@ -73,6 +75,8 @@ assert_file_contains() {
 run_sync_child() {
     (
         cd "$CALLER_CWD"
+        # The child script intentionally expands variables inside its own shell.
+        # shellcheck disable=SC2016
         env \
             HOME="$HOME_DIR" \
             PATH="$FIXTURE_PATH" \
