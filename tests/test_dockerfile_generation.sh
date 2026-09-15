@@ -11,15 +11,15 @@ if [[ ${1:-} == --child ]]; then
     export PROJECT_DIR="$TEST_ROOT/project"
     export PROJECT_PARENT_DIR="$TEST_ROOT/state"
     # These boundary functions are invoked by the dynamically loaded generator.
-    # shellcheck disable=SC2329
+    # shellcheck disable=SC2317,SC2329
     crc32_file() { cksum "$1" | cut -d ' ' -f1; }
-    # shellcheck disable=SC2329
+    # shellcheck disable=SC2317,SC2329
     generate_parent_folder_name() { printf 'test-project\n'; }
-    # shellcheck disable=SC2329
+    # shellcheck disable=SC2317,SC2329
     save_docker_layer_checksums() { :; }
-    # shellcheck disable=SC2329
+    # shellcheck disable=SC2317,SC2329
     error() { printf '%s\n' "$*" >&2; exit 1; }
-    # shellcheck disable=SC2329
+    # shellcheck disable=SC2317,SC2329
     run_docker_build() {
         cp "$1" "$TEST_ROOT/generated.Dockerfile"
         [[ "$TEST_FAIL" == false ]] || return 17
