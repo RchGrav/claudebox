@@ -31,13 +31,15 @@ _cmd_profiles() {
     for profile in $(get_all_profile_names | tr ' ' '\n' | sort); do
         local desc=$(get_profile_description "$profile")
         local is_enabled=false
-        # Check if profile is currently enabled
-        for enabled in "${current_profiles[@]}"; do
-            if [[ "$enabled" == "$profile" ]]; then
-                is_enabled=true
-                break
-            fi
-        done
+        # Check if profile is currently enabled (guard for empty array)
+        if [ ${#current_profiles[@]} -gt 0 ]; then
+            for enabled in "${current_profiles[@]}"; do
+                if [[ "$enabled" == "$profile" ]]; then
+                    is_enabled=true
+                    break
+                fi
+            done
+        fi
         printf "  ${GREEN}%-15s${NC} " "$profile"
         if [[ "$is_enabled" == "true" ]]; then
             printf "${GREEN}✓${NC} "
@@ -144,12 +146,14 @@ _cmd_add() {
     
     # Check if any Python-related profiles were added
     local python_profiles_added=false
-    for profile in "${selected[@]}"; do
-        if [[ "$profile" == "python" ]] || [[ "$profile" == "ml" ]] || [[ "$profile" == "datascience" ]]; then
-            python_profiles_added=true
-            break
-        fi
-    done
+    if [ ${#selected[@]} -gt 0 ]; then
+        for profile in "${selected[@]}"; do
+            if [[ "$profile" == "python" ]] || [[ "$profile" == "ml" ]] || [[ "$profile" == "datascience" ]]; then
+                python_profiles_added=true
+                break
+            fi
+        done
+    fi
     
     # If Python profiles were added, remove the pydev flag to trigger reinstall
     if [[ "$python_profiles_added" == "true" ]]; then
@@ -162,12 +166,14 @@ _cmd_add() {
     
     # Only show rebuild message for non-Python profiles
     local needs_rebuild=false
-    for profile in "${selected[@]}"; do
-        if [[ "$profile" != "python" ]] && [[ "$profile" != "ml" ]] && [[ "$profile" != "datascience" ]]; then
-            needs_rebuild=true
-            break
-        fi
-    done
+    if [ ${#selected[@]} -gt 0 ]; then
+        for profile in "${selected[@]}"; do
+            if [[ "$profile" != "python" ]] && [[ "$profile" != "ml" ]] && [[ "$profile" != "datascience" ]]; then
+                needs_rebuild=true
+                break
+            fi
+        done
+    fi
     
     if [[ "$needs_rebuild" == "true" ]]; then
         warn "The Docker image will be rebuilt with new profiles on next run."
@@ -229,29 +235,35 @@ _cmd_remove() {
     # Remove specified profiles
     local new_profiles=()
     local python_profiles_removed=false
-    for profile in "${current_profiles[@]}"; do
-        local keep=true
-        for remove in "${to_remove[@]}"; do
-            if [[ "$profile" == "$remove" ]]; then
-                keep=false
-                # Check if we're removing a Python-related profile
-                if [[ "$profile" == "python" ]] || [[ "$profile" == "ml" ]] || [[ "$profile" == "datascience" ]]; then
-                    python_profiles_removed=true
-                fi
-                break
+    if [ ${#current_profiles[@]} -gt 0 ]; then
+        for profile in "${current_profiles[@]}"; do
+            local keep=true
+            if [ ${#to_remove[@]} -gt 0 ]; then
+                for remove in "${to_remove[@]}"; do
+                    if [[ "$profile" == "$remove" ]]; then
+                        keep=false
+                        # Check if we're removing a Python-related profile
+                        if [[ "$profile" == "python" ]] || [[ "$profile" == "ml" ]] || [[ "$profile" == "datascience" ]]; then
+                            python_profiles_removed=true
+                        fi
+                        break
+                    fi
+                done
             fi
+            [[ "$keep" == "true" ]] && new_profiles+=("$profile")
         done
-        [[ "$keep" == "true" ]] && new_profiles+=("$profile")
-    done
+    fi
     
     # Check if any Python-related profiles remain
     local has_python_profiles=false
-    for profile in "${new_profiles[@]}"; do
-        if [[ "$profile" == "python" ]] || [[ "$profile" == "ml" ]] || [[ "$profile" == "datascience" ]]; then
-            has_python_profiles=true
-            break
-        fi
-    done
+    if [ ${#new_profiles[@]} -gt 0 ]; then
+        for profile in "${new_profiles[@]}"; do
+            if [[ "$profile" == "python" ]] || [[ "$profile" == "ml" ]] || [[ "$profile" == "datascience" ]]; then
+                has_python_profiles=true
+                break
+            fi
+        done
+    fi
     
     # If we removed Python profiles and no Python profiles remain, clean up Python flags
     if [[ "$python_profiles_removed" == "true" ]] && [[ "$has_python_profiles" == "false" ]]; then
@@ -275,9 +287,11 @@ _cmd_remove() {
     # Write back the filtered profiles
     {
         echo "[profiles]"
-        for profile in "${new_profiles[@]}"; do
-            echo "$profile"
-        done
+        if [ ${#new_profiles[@]} -gt 0 ]; then
+            for profile in "${new_profiles[@]+"${new_profiles[@]}"}"; do
+                echo "$profile"
+            done
+        fi
         echo ""
         
         # Preserve packages section if it exists

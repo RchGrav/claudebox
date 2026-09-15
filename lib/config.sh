@@ -130,7 +130,7 @@ read_profile_section() {
         done < <(sed -n "/^\[$section\]/,/^\[/p" "$profile_file" | tail -n +2 | grep -v '^\[')
     fi
 
-    printf '%s\n' "${result[@]}"
+    printf '%s\n' "${result[@]+"${result[@]}"}"
 }
 
 update_profile_section() {
@@ -140,20 +140,29 @@ update_profile_section() {
     local new_items=("$@")
 
     local existing_items=()
-    readarray -t existing_items < <(read_profile_section "$profile_file" "$section")
+    # Bash 3.2 compatible - no readarray
+    while IFS= read -r line; do
+        existing_items+=("$line")
+    done < <(read_profile_section "$profile_file" "$section")
 
     local all_items=()
-    for item in "${existing_items[@]}"; do
-        [[ -n "$item" ]] && all_items+=("$item")
-    done
-
-    for item in "${new_items[@]}"; do
-        local found=false
-        for existing in "${all_items[@]}"; do
-            [[ "$existing" == "$item" ]] && found=true && break
+    if [ ${#existing_items[@]} -gt 0 ]; then
+        for item in "${existing_items[@]+"${existing_items[@]}"}"; do
+            [[ -n "$item" ]] && all_items+=("$item")
         done
-        [[ "$found" == "false" ]] && all_items+=("$item")
-    done
+    fi
+
+    if [ ${#new_items[@]} -gt 0 ]; then
+        for item in "${new_items[@]+"${new_items[@]}"}"; do
+            local found=false
+            if [ ${#all_items[@]} -gt 0 ]; then
+                for existing in "${all_items[@]+"${all_items[@]}"}"; do
+                    [[ "$existing" == "$item" ]] && found=true && break
+                done
+            fi
+            [[ "$found" == "false" ]] && all_items+=("$item")
+        done
+    fi
 
     {
         if [[ -f "$profile_file" ]]; then
@@ -169,9 +178,11 @@ update_profile_section() {
         fi
 
         echo "[$section]"
-        for item in "${all_items[@]}"; do
-            echo "$item"
-        done
+        if [ ${#all_items[@]} -gt 0 ]; then
+            for item in "${all_items[@]+"${all_items[@]}"}"; do
+                echo "$item"
+            done
+        fi
         echo ""
     } > "${profile_file}.tmp" && mv "${profile_file}.tmp" "$profile_file"
 }
@@ -186,7 +197,7 @@ get_current_profiles() {
         done < <(read_profile_section "$profiles_file" "profiles")
     fi
     
-    printf '%s\n' "${current_profiles[@]}"
+    printf '%s\n' "${current_profiles[@]+"${current_profiles[@]}"}"
 }
 
 # -------- Profile installation functions for Docker builds -------------------

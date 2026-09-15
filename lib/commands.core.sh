@@ -113,11 +113,11 @@ _cmd_shell() {
         trap cleanup_admin EXIT
         
         if [[ "$VERBOSE" == "true" ]]; then
-            echo "[DEBUG] Running admin container with flags: ${shell_flags[*]}" >&2
+            echo "[DEBUG] Running admin container with flags: ${shell_flags[*]+"${shell_flags[*]}"}" >&2
             echo "[DEBUG] Remaining args after processing: $*" >&2
         fi
         # Don't pass any remaining arguments - only shell and the flags
-        run_claudebox_container "$temp_container" "interactive" shell "${shell_flags[@]}"
+        run_claudebox_container "$temp_container" "interactive" shell "${shell_flags[@]+"${shell_flags[@]}"}"
         
         # Commit changes back to image
         fillbar
@@ -127,7 +127,7 @@ _cmd_shell() {
         success "Changes saved to image!"
     else
         # Regular shell mode - just run without committing
-        run_claudebox_container "" "interactive" shell "${shell_flags[@]}"
+        run_claudebox_container "" "interactive" shell "${shell_flags[@]+"${shell_flags[@]}"}"
     fi
     
     exit 0

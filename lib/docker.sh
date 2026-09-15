@@ -296,15 +296,18 @@ run_claudebox_container() {
     # Set up cleanup trap for temporary MCP config files
     cleanup_mcp_files() {
         local file
-        for file in "${mcp_temp_files[@]}"; do
-            if [[ -f "$file" ]]; then
-                rm -f "$file"
-            fi
-        done
-        if [[ -n "$user_mcp_file" ]] && [[ -f "$user_mcp_file" ]]; then
+        # Check if array exists and has elements (set -u safe)
+        if [[ -n "${mcp_temp_files+set}" ]] && [ ${#mcp_temp_files[@]} -gt 0 ]; then
+            for file in "${mcp_temp_files[@]}"; do
+                if [[ -f "$file" ]]; then
+                    rm -f "$file"
+                fi
+            done
+        fi
+        if [[ -n "${user_mcp_file:-}" ]] && [[ -f "$user_mcp_file" ]]; then
             rm -f "$user_mcp_file"
         fi
-        if [[ -n "$project_mcp_file" ]] && [[ -f "$project_mcp_file" ]]; then
+        if [[ -n "${project_mcp_file:-}" ]] && [[ -f "$project_mcp_file" ]]; then
             rm -f "$project_mcp_file"
         fi
     }
