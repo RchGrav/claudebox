@@ -16,11 +16,8 @@ jobs:
           fetch-depth: 0
       - name: Capture lint baseline and offline tools
         run: |
-          sudo apt-get update
-          sudo apt-get install -y shellcheck jq
           mkdir -p /tmp/claudebox-lint-tools
-          cp /usr/bin/shellcheck /usr/bin/jq /tmp/claudebox-lint-tools/
-          cp /usr/lib/x86_64-linux-gnu/libjq.so.1 /usr/lib/x86_64-linux-gnu/libonig.so.5 /tmp/claudebox-lint-tools/
+          cp /usr/bin/shellcheck /tmp/claudebox-lint-tools/
           git bundle create /tmp/claudebox-lint-tools/repository.bundle --all
           shellcheck --version > /tmp/claudebox-lint-tools/version.txt
           if shellcheck -x -f json main.sh lib/*.sh > /tmp/claudebox-lint-tools/baseline.json; then
@@ -28,12 +25,6 @@ jobs:
           else
             printf '%s\n' "$?" > /tmp/claudebox-lint-tools/lint-status.txt
           fi
-          curl -fsSL https://ftp.gnu.org/gnu/bash/bash-3.2.57.tar.gz -o /tmp/bash32.tar.gz
-          tar -xzf /tmp/bash32.tar.gz -C /tmp
-          cd /tmp/bash-3.2.57
-          ./configure --prefix=/tmp/bash32 > /tmp/claudebox-lint-tools/bash-build.log 2>&1
-          make -j2 >> /tmp/claudebox-lint-tools/bash-build.log 2>&1
-          cp bash /tmp/claudebox-lint-tools/bash32
       - uses: actions/upload-artifact@v4
         if: always()
         with:
