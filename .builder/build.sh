@@ -32,6 +32,9 @@ tar -czf "$TEMP_ARCHIVE" \
   --exclude='.gitignore' \
   --exclude='.github' \
   --exclude='.builder' \
+  --exclude='.omx' \
+  --exclude='.agents' \
+  --exclude='.codex' \
   --exclude='.claude' \
   --exclude='.vscode' \
   --exclude='.idea' \
@@ -46,6 +49,11 @@ tar -czf "$TEMP_ARCHIVE" \
 
 # Move to final location
 mv "$TEMP_ARCHIVE" "$ARCHIVE"
+
+if tar -tzf "$ARCHIVE" | grep -E '^\./\.(omx|agents|codex)(/|$)' >/dev/null; then
+  echo "❌ Archive includes local runtime state" >&2
+  exit 1
+fi
 
 # Calculate SHA256
 if command -v sha256sum >/dev/null 2>&1; then

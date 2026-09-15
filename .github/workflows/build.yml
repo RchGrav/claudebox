@@ -45,6 +45,9 @@ jobs:
           "$HOME/.local/bin/claudebox" profiles
           bash "$HOME/.claudebox/source/tests/test_bash32_compat.sh"
           bash "$HOME/.claudebox/source/tests/test_cli_bash32.sh"
+          bash "$HOME/.claudebox/source/tests/test_command_sync.sh"
+          bash "$HOME/.claudebox/source/tests/test_docker_runtime.sh"
+          bash "$HOME/.claudebox/source/tests/test_dockerfile_generation.sh"
 
   release:
     needs: test-installer

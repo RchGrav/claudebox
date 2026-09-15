@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # Fixed CRC32 functions that work on Mac and Linux without xxd
 # ============================================================================
 # CRC32 Functions

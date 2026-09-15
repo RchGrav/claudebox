@@ -70,5 +70,26 @@ md5_string() {
 # Initialize MD5 command on library load
 set_md5_command
 
+# ============================================================================
+# Portable SHA256 Helpers
+# ============================================================================
+
+# Accept filenames or '-' for stdin, matching both platform checksum tools.
+sha256_file() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$@"
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$@"
+    else
+        error "No SHA256 command found. Please install sha256sum or shasum."
+    fi | cut -d ' ' -f1
+}
+
+sha256_string() {
+    local string="$1"
+    printf '%s' "$string" | sha256_file -
+}
+
 # Export functions
 export -f set_md5_command md5_file md5_string
+export -f sha256_file sha256_string
