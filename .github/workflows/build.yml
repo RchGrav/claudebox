@@ -23,21 +23,28 @@ jobs:
       - name: Build installer
         run: bash .builder/build.sh
 
-      - name: Test installer in temporary directory
-        run: |
-          export TEST_HOME=$(mktemp -d)
-          export HOME="$TEST_HOME"
-          echo "Testing installation in $HOME"
-          bash ./claudebox.run.sh
-          ls -la ~/.claudebox/scripts/bin/
-          ~/.local/bin/claudebox --help || echo "OK (help displayed or no version flag)"
-
       - name: Upload installer artifact
         if: matrix.os == 'ubuntu-latest'
         uses: actions/upload-artifact@v4
         with:
           name: claudebox-installer
-          path: claudebox.run.sh
+          path: |
+            dist/claudebox.run
+            dist/claudebox-*.tar.gz
+          if-no-files-found: error
+
+      - name: Test installer in temporary directory
+        run: |
+          TEST_HOME=$(mktemp -d)
+          trap 'rm -rf "$TEST_HOME"' EXIT
+          export HOME="$TEST_HOME"
+          printf 'Testing installation in %s\n' "$HOME"
+          bash ./dist/claudebox.run profiles
+          test -f "$HOME/.claudebox/source/main.sh"
+          test -L "$HOME/.local/bin/claudebox"
+          "$HOME/.local/bin/claudebox" profiles
+          bash "$HOME/.claudebox/source/tests/test_bash32_compat.sh"
+          bash "$HOME/.claudebox/source/tests/test_cli_bash32.sh"
 
   release:
     needs: test-installer
@@ -56,6 +63,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ github.event.release.upload_url }}
-          asset_path: ./claudebox.run.sh
-          asset_name: claudebox.run.sh
+          asset_path: ./dist/claudebox.run
+          asset_name: claudebox.run
           asset_content_type: application/x-sh
