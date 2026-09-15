@@ -47,6 +47,7 @@ jobs:
           /bin/bash "$HOME/.claudebox/source/tests/test_cli_bash32.sh"
           /bin/bash "$HOME/.claudebox/source/tests/test_runtime_regressions.sh"
           /bin/bash "$HOME/.claudebox/source/tests/test_profile_download_failure.sh"
+          /bin/bash "$HOME/.claudebox/source/tests/test_dockerfile_template.sh"
 
   release:
     needs: test-installer

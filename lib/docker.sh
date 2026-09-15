@@ -245,8 +245,21 @@ run_claudebox_container() (
     mkdir -p "$PROJECT_PARENT_DIR/.local/share/uv/python"
     docker_args+=(-v "$PROJECT_PARENT_DIR/.local/share/uv/python:/home/$DOCKER_USER/.local/share/uv/python")
     
-    # Mount SSH directory
-    docker_args+=(-v "$HOME/.ssh":"/home/$DOCKER_USER/.ssh:ro")
+    # SSH directory mounting
+    # Priority: $CLAUDEBOX_HOME/ssh (r/w) > ~/.ssh (r/o)
+    if [[ -d "$CLAUDEBOX_HOME/ssh" ]]; then
+        # Mount the dedicated directory even when it is still empty.
+        docker_args+=(-v "$CLAUDEBOX_HOME/ssh:/home/$DOCKER_USER/.ssh")
+        if [[ "$VERBOSE" == "true" ]]; then
+            echo "[DEBUG] Mounting ClaudeBox SSH directory (r/w): $CLAUDEBOX_HOME/ssh" >&2
+        fi
+    elif [[ -d "$HOME/.ssh" ]]; then
+        # Fall back to the host SSH directory read-only. Keys remain readable.
+        docker_args+=(-v "$HOME/.ssh:/home/$DOCKER_USER/.ssh:ro")
+        if [[ "$VERBOSE" == "true" ]]; then
+            echo "[DEBUG] Mounting default SSH directory (r/o): $HOME/.ssh" >&2
+        fi
+    fi
     
     # Mount git config if it exists
     if [[ -f "$HOME/.gitconfig" ]]; then
@@ -400,9 +413,11 @@ run_claudebox_container() (
         slot_index=$(get_slot_index "$slot_name" "$PROJECT_PARENT_DIR" 2>/dev/null || echo "1")
     fi
     
+    if [[ -n "${ANTHROPIC_API_KEY+x}" ]]; then
+        docker_args+=(-e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY")
+    fi
     docker_args+=(
         -e "NODE_ENV=${NODE_ENV:-production}"
-        -e "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}"
         -e "CLAUDEBOX_PROJECT_NAME=$project_name"
         -e "CLAUDEBOX_SLOT_NAME=$slot_name"
         -e "TERM=${TERM:-xterm-256color}"
