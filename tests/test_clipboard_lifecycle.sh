@@ -44,6 +44,7 @@ env HOME="$TEST_ROOT/home" ROOT_DIR="$ROOT_DIR" TEST_ROOT="$TEST_ROOT" \
     REDIRECT_TOKEN="$redirect_token" python3 - "$redirect_port_file" <<'\''PY'\'' &
 import http.server
 import os
+import socketserver
 import sys
 
 ready = sys.argv[1]
@@ -76,14 +77,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
-server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+# This fixture needs HTTP parsing but no reverse-DNS lookup.
+server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), Handler)
 with open(ready, "w", encoding="utf-8") as handle:
     handle.write(str(server.server_address[1]))
 server.serve_forever()
 PY
     redirect_pid=$!
-    for _attempt in 1 2 3 4 5 6 7 8 9 10; do
+    for ((_attempt=0; _attempt<200; _attempt++)); do
         [[ -s "$redirect_port_file" ]] && break
+        kill -0 "$redirect_pid" 2>/dev/null || exit 1
         sleep 0.05
     done
     redirect_port=$(cat "$redirect_port_file")
