@@ -85,7 +85,8 @@ docker_exec_user() {
 #   args: Commands to pass to claude in container
 # Returns: Exit code from container
 # Note: Handles all mounting, environment setup, and security configuration
-run_claudebox_container() {
+# Keep runtime cleanup scoped to this call without replacing the caller's traps.
+run_claudebox_container() (
     local container_name="$1"
     local run_mode="$2"  # "interactive", "detached", "pipe", or "attached"
     shift 2
@@ -239,10 +240,10 @@ run_claudebox_container() {
     # Mount .cache directory
     docker_args+=(-v "$PROJECT_SLOT_DIR/.cache":/home/$DOCKER_USER/.cache)
     
-    # Mount .local/share for uv-managed Python installations
-    # uv downloads Python to ~/.local/share/uv/python/ which must persist across containers
-    mkdir -p "$PROJECT_SLOT_DIR/.local/share"
-    docker_args+=(-v "$PROJECT_SLOT_DIR/.local/share":/home/$DOCKER_USER/.local/share)
+    # The shared project venv must see the same managed Python in every slot.
+    # Mount only interpreters so image-provided uv tools remain visible.
+    mkdir -p "$PROJECT_PARENT_DIR/.local/share/uv/python"
+    docker_args+=(-v "$PROJECT_PARENT_DIR/.local/share/uv/python:/home/$DOCKER_USER/.local/share/uv/python")
     
     # Mount SSH directory
     docker_args+=(-v "$HOME/.ssh":"/home/$DOCKER_USER/.ssh:ro")
@@ -417,7 +418,7 @@ run_claudebox_container() {
     local exit_code=$?
     
     return $exit_code
-}
+)
 
 check_container_exists() {
     local container_name="$1"

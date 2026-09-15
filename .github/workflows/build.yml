@@ -43,8 +43,10 @@ jobs:
           test -f "$HOME/.claudebox/source/main.sh"
           test -L "$HOME/.local/bin/claudebox"
           "$HOME/.local/bin/claudebox" profiles
-          bash "$HOME/.claudebox/source/tests/test_bash32_compat.sh"
-          bash "$HOME/.claudebox/source/tests/test_cli_bash32.sh"
+          /bin/bash "$HOME/.claudebox/source/tests/test_bash32_compat.sh"
+          /bin/bash "$HOME/.claudebox/source/tests/test_cli_bash32.sh"
+          /bin/bash "$HOME/.claudebox/source/tests/test_runtime_regressions.sh"
+          /bin/bash "$HOME/.claudebox/source/tests/test_profile_download_failure.sh"
 
   release:
     needs: test-installer

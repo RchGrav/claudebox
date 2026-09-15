@@ -29,7 +29,7 @@ get_profile_packages() {
         ruby) echo "ruby-full ruby-dev libreadline-dev libyaml-dev libsqlite3-dev sqlite3 libxml2-dev libxslt1-dev libcurl4-openssl-dev software-properties-common" ;;
         php) echo "php php-cli php-fpm php-mysql php-pgsql php-sqlite3 php-curl php-gd php-mbstring php-xml php-zip composer" ;;
         database) echo "postgresql-client mysql-client sqlite3 redis-tools mongodb-clients" ;;
-        devops) echo "docker.io docker-compose ansible" ;;  # kubectl, helm, terraform installed via scripts
+        devops) echo "docker.io docker-compose ansible awscli" ;;  # kubectl, helm, terraform installed via scripts
         web) echo "nginx apache2-utils httpie" ;;
         embedded) echo "gcc-arm-none-eabi gdb-multiarch openocd picocom minicom screen" ;;
         datascience) echo "r-base" ;;
@@ -338,7 +338,8 @@ get_profile_devops() {
 RUN ARCH=\$(dpkg --print-architecture) && \\
     curl -fsSL "https://dl.k8s.io/release/\$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/\${ARCH}/kubectl" -o /usr/local/bin/kubectl && \\
     chmod +x /usr/local/bin/kubectl && \\
-    curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash && \\
+    curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 -o /tmp/get-helm-3 && \\
+    bash /tmp/get-helm-3 && rm /tmp/get-helm-3 && \\
     curl -fsSL "https://releases.hashicorp.com/terraform/${terraform_version}/terraform_${terraform_version}_linux_\${ARCH}.zip" -o /tmp/terraform.zip && \\
     unzip -o /tmp/terraform.zip -d /usr/local/bin && \\
     rm /tmp/terraform.zip
