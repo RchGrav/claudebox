@@ -74,7 +74,9 @@ class ClipboardRequestHandler(http.server.BaseHTTPRequestHandler):
             self._send_empty(401)
             return
 
-        if self.path == "/types":
+        if self.path == "/health":
+            self._send_empty(204)
+        elif self.path == "/types":
             self._handle_types()
         elif self.path == "/image":
             self._handle_image()

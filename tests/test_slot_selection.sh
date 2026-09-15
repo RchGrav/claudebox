@@ -75,7 +75,16 @@ source "$ROOT_DIR/lib/project.sh"
 # shellcheck disable=SC1091
 source "$ROOT_DIR/lib/preflight.sh"
 # shellcheck disable=SC1091
+source "$ROOT_DIR/lib/clipboard.sh"
+# shellcheck disable=SC1091
 source "$ROOT_DIR/lib/commands.slot.sh"
+
+clipboard_probe_status=0
+clipboard_bridge_probe() {
+    [[ -n "${1:-}" ]] || return 1
+    [[ -n "${2:-}" ]] || return 1
+    return "$clipboard_probe_status"
+}
 
 TESTS_RUN=0
 TESTS_PASSED=0
@@ -195,12 +204,32 @@ active_slot_clipboard_with_bridge_attaches() {
     export DOCKER_INSPECT_ENV="CLAUDEBOX_CLIPBOARD_URL=http://host.docker.internal:45678
 CLAUDEBOX_CLIPBOARD_TOKEN=test-token"
     export CLAUDEBOX_CLIPBOARD=true
+    clipboard_probe_status=0
     docker_attach_status=0
     export DOCKER_ATTACH_STATUS=0
     output="$(_cmd_slot 1 2>&1)" || return 1
     unset CLAUDEBOX_CLIPBOARD
 
     printf '%s' "$output" | grep -q "^attach:$running_container$"
+}
+
+active_slot_clipboard_with_dead_bridge_fails() {
+    local output=""
+    local status=0
+
+    export DOCKER_PS_NAMES="$running_container"
+    export DOCKER_INSPECT_ENV="CLAUDEBOX_CLIPBOARD_URL=http://host.docker.internal:45678
+CLAUDEBOX_CLIPBOARD_TOKEN=test-token"
+    export CLAUDEBOX_CLIPBOARD=true
+    clipboard_probe_status=1
+    output="$(_cmd_slot 1 2>&1)"
+    status=$?
+    unset CLAUDEBOX_CLIPBOARD
+    clipboard_probe_status=0
+
+    [ "$status" -ne 0 ] &&
+        printf '%s' "$output" | grep -q 'without live clipboard support' &&
+        ! printf '%s' "$output" | grep -q "^attach:"
 }
 
 main_clipboard_slot_without_bridge_fails() {
@@ -221,6 +250,7 @@ check "idle explicit slot launches selected container" idle_slot_runs_container
 check "active explicit slot attach preserves status" active_slot_attach_preserves_status
 check "active slot rejects late clipboard enablement" active_slot_clipboard_without_bridge_fails
 check "active slot with existing clipboard bridge attaches" active_slot_clipboard_with_bridge_attaches
+check "active slot rejects stale clipboard bridge" active_slot_clipboard_with_dead_bridge_fails
 check "main clipboard slot rejects active session without bridge" main_clipboard_slot_without_bridge_fails
 
 printf '\n%d/%d passed\n' "$TESTS_PASSED" "$TESTS_RUN"

@@ -80,10 +80,18 @@ _cmd_slot() {
         fi
         if [[ ${CLAUDEBOX_CLIPBOARD:-false} == true ]]; then
             local container_env
+            local bridge_url=""
+            local bridge_token=""
+            local env_line
             container_env=$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$container_name" 2>/dev/null || true)
-            if ! printf '%s\n' "$container_env" | grep -q '^CLAUDEBOX_CLIPBOARD_URL=.' ||
-                ! printf '%s\n' "$container_env" | grep -q '^CLAUDEBOX_CLIPBOARD_TOKEN=.'; then
-                error "Slot $slot_num is already running without clipboard support. Stop it with 'claudebox kill $slot_name', then start it with 'claudebox --clipboard slot $slot_num'."
+            while IFS= read -r env_line; do
+                case "$env_line" in
+                    CLAUDEBOX_CLIPBOARD_URL=*) bridge_url="${env_line#CLAUDEBOX_CLIPBOARD_URL=}" ;;
+                    CLAUDEBOX_CLIPBOARD_TOKEN=*) bridge_token="${env_line#CLAUDEBOX_CLIPBOARD_TOKEN=}" ;;
+                esac
+            done <<< "$container_env"
+            if ! clipboard_bridge_probe "$bridge_url" "$bridge_token"; then
+                error "Slot $slot_num is already running without live clipboard support. Stop it with 'claudebox kill $slot_name', then start it with 'claudebox --clipboard slot $slot_num'."
                 return 1
             fi
         fi

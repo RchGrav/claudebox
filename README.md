@@ -209,6 +209,8 @@ The HTTP listener binds only to host loopback; treat the session token as a
 secret and enable this only for containers you trust with that
 clipboard access. Enabling it on an already-running slot requires restarting that
 slot unless it was started with clipboard support.
+If Docker detach keys leave the container running after its launcher exits, the
+bridge stops too; restart that slot to restore clipboard access.
 
 Terminal selection is separate from application clipboard access. In Apple
 Terminal, if a wrapped login URL cannot be selected, use **Select All**, copy into

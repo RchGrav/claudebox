@@ -167,7 +167,7 @@ test("unsupported text requests exit nonzero without contacting the bridge", asy
   }
 });
 
-test("wl-copy posts UTF-8 text to the bridge", async () => {
+test("Claude wl-copy and xclip text commands post UTF-8 to the bridge", async () => {
   const seen = [];
   const server = await startClipboardServer((req, res) => {
     seen.push({ url: req.url, method: req.method, auth: req.headers.authorization });
@@ -184,14 +184,15 @@ test("wl-copy posts UTF-8 text to the bridge", async () => {
   });
 
   try {
-    const result = await runClientWithInput("wl-copy", [], Buffer.from("copy me"), {
-      url: server.url,
-      token: "token",
-    });
-
-    assert.strictEqual(result.code, 0);
-    assert.strictEqual(result.stdout.length, 0);
-    assert.strictEqual(seen.length, 1);
+    for (const [command, argv] of [["wl-copy", []], ["xclip", ["-selection", "clipboard"]]]) {
+      const result = await runClientWithInput(command, argv, Buffer.from("copy me"), {
+        url: server.url,
+        token: "token",
+      });
+      assert.strictEqual(result.code, 0);
+      assert.strictEqual(result.stdout.length, 0);
+    }
+    assert.strictEqual(seen.length, 2);
   } finally {
     await server.close();
   }

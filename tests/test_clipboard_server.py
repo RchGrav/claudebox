@@ -189,6 +189,20 @@ class ClipboardServerTest(unittest.TestCase):
 
         self.assertEqual(provider.calls, 0)
 
+    def test_health_requires_auth_without_accessing_clipboard(self):
+        module = load_server_module()
+        provider = FixtureProvider(PNG_BYTES)
+        with RunningServer(module, provider) as server:
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                server.request("/health", token="wrong-token")
+            self.assertEqual(caught.exception.code, 401)
+            caught.exception.close()
+            with server.request("/health", token=server.token) as response:
+                self.assertEqual(response.status, 204)
+                self.assertEqual(response.read(), b"")
+            self.assertEqual(server.text_writer.values, [])
+        self.assertEqual(provider.calls, 0)
+
     def test_types_advertises_png_only_when_provider_has_image(self):
         module = load_server_module()
         provider = FixtureProvider(PNG_BYTES)
