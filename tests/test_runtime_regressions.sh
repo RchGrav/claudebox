@@ -25,6 +25,15 @@ source "$ROOT_DIR/lib/docker.sh"
 get_slot_index() { printf '1\n'; }
 # Capture the arguments and read MCP bind sources while the real launcher runs.
 docker() {
+    case "${1:-}" in
+        image) return 0 ;;
+        commit)
+            printf 'commit\n' >> "$SANDBOX/commits"
+            test -f "$SANDBOX/container"
+            return $? ;;
+        rm) rm -f "$SANDBOX/container"; return 0 ;;
+        run) touch "$SANDBOX/container" ;;
+    esac
     printf '%s\n' "$@" > "$SANDBOX/args"
     local arg path
     for arg in "$@"; do
@@ -39,8 +48,17 @@ docker() {
     done
     return "${DOCKER_STATUS:-0}"
 }
-trap 'printf done > "$SANDBOX/caller-cleanup"' EXIT
-run_claudebox_container "claudebox-test-slot" "pipe" --resume 'a session with spaces'
+if [ "${TEST_ADMIN:-false}" = true ]; then
+    source "$ROOT_DIR/lib/commands.core.sh"
+    cecho() { :; }
+    fillbar() { :; }
+    success() { :; }
+    YELLOW=''
+    _cmd_shell admin
+else
+    trap 'printf done > "$SANDBOX/caller-cleanup"' EXIT
+    run_claudebox_container "claudebox-test-slot" "pipe" --resume 'a session with spaces'
+fi
 CHILD
 
 PASSED=0
@@ -84,6 +102,12 @@ find "$TMPDIR" -type f -exec rm -f {} \;
 export PROJECT_SLOT_DIR="$PROJECT_PARENT_DIR/slot2"
 "$BASH" "$SANDBOX/run.sh"
 check 'a second slot uses the same managed-Python store' grep -Fxq "$PROJECT_PARENT_DIR/.local/share/uv/python:/home/claude/.local/share/uv/python" "$SANDBOX/args"
+
+status=0
+TEST_ADMIN=true "$BASH" "$SANDBOX/run.sh" || status=$?
+check 'admin shell exits successfully after saving changes' test "$status" -eq 0
+check 'admin shell commits exactly once' test "$(wc -l < "$SANDBOX/commits" | tr -d ' ')" -eq 1
+check 'admin shell removes its stopped container' test ! -f "$SANDBOX/container"
 
 source "$ROOT_DIR/lib/config.sh"
 check 'DevOps profile retains AWS CLI' bash -c 'case " $(get_profile_packages devops) " in *" awscli "*) exit 0;; *) exit 1;; esac'
