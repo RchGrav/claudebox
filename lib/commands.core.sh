@@ -33,12 +33,12 @@ _cmd_help() {
                 show_claude_help
             else
                 # Not in project directory - show ClaudeBox help
-                show_help
+                show_help "" ""
             fi
             ;;
         *)
             # Unknown subcommand - show regular help
-            show_help
+            show_help "" ""
             ;;
     esac
     
@@ -106,6 +106,8 @@ _cmd_shell() {
         local temp_container="claudebox-admin-$$"
         
         # Ensure cleanup runs on any exit (including Ctrl-C)
+        # Invoked by the EXIT trap; exercised by test_runtime_regressions.sh.
+        # shellcheck disable=SC2317
         cleanup_admin() {
             docker commit "$temp_container" "$IMAGE_NAME" >/dev/null 2>&1
             docker rm -f "$temp_container" >/dev/null 2>&1
@@ -152,12 +154,14 @@ _cmd_update() {
         
         if [[ -f /tmp/claudebox.new ]]; then
             # Find the installed claudebox (not the source)
-            local installed_path=$(which claudebox 2>/dev/null || echo "/usr/local/bin/claudebox")
+            local installed_path
+            installed_path=$(which claudebox 2>/dev/null || echo "/usr/local/bin/claudebox")
             
             # If it's a symlink, replace it with the actual file first
             if [[ -L "$installed_path" ]]; then
                 info "Converting symlink to real file..."
-                local source_file=$(readlink -f "$installed_path")
+                local source_file
+                source_file=$(readlink -f "$installed_path")
                 if [[ -w "$(dirname "$installed_path")" ]]; then
                     cp "$source_file" "$installed_path.tmp"
                     mv "$installed_path.tmp" "$installed_path"
@@ -179,7 +183,8 @@ _cmd_update() {
                 # Backup current installed version
                 local backups_dir="$HOME/.claudebox/backups"
                 mkdir -p "$backups_dir"
-                local timestamp=$(date +%s)
+                local timestamp
+                timestamp=$(date +%s)
                 cp "$installed_path" "$backups_dir/$timestamp"
                 info "Backed up current version to $backups_dir/$timestamp"
                 

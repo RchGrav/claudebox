@@ -11,6 +11,7 @@
 # - help: Shows ClaudeBox help and Claude CLI help
 # - shell: Opens an interactive shell in the container
 # - update: Updates Claude CLI and optionally ClaudeBox itself
+# shellcheck source=lib/commands.core.sh
 source "${LIB_DIR}/commands.core.sh"
 
 # ============================================================================
@@ -22,6 +23,7 @@ source "${LIB_DIR}/commands.core.sh"
 # - add: Adds development profiles to the project
 # - remove: Removes profiles from the project
 # - install: Installs additional apt packages
+# shellcheck source=lib/commands.profile.sh
 source "${LIB_DIR}/commands.profile.sh"
 
 # ============================================================================
@@ -32,6 +34,7 @@ source "${LIB_DIR}/commands.profile.sh"
 # - slots: Lists all container slots for the project
 # - slot: Launches a specific numbered slot
 # - revoke: Removes container slots
+# shellcheck source=lib/commands.slot.sh
 source "${LIB_DIR}/commands.slot.sh"
 
 # ============================================================================
@@ -41,6 +44,7 @@ source "${LIB_DIR}/commands.slot.sh"
 # - info: Shows comprehensive project and system information
 # - projects: Lists all ClaudeBox projects system-wide
 # - allowlist: Shows/manages the firewall allowlist
+# shellcheck source=lib/commands.info.sh
 source "${LIB_DIR}/commands.info.sh"
 
 # ============================================================================
@@ -50,6 +54,7 @@ source "${LIB_DIR}/commands.info.sh"
 # - clean: Various cleanup operations (containers, images, cache, etc.)
 # - undo: Restores the oldest backup of claudebox script
 # - redo: Restores the newest backup of claudebox script
+# shellcheck source=lib/commands.clean.sh
 source "${LIB_DIR}/commands.clean.sh"
 
 # ============================================================================
@@ -61,6 +66,7 @@ source "${LIB_DIR}/commands.clean.sh"
 # - rebuild: Forces a Docker image rebuild
 # - tmux: Launches ClaudeBox with tmux support
 # - project: Opens a project by name from anywhere
+# shellcheck source=lib/commands.system.sh
 source "${LIB_DIR}/commands.system.sh"
 
 # ============================================================================
@@ -75,11 +81,11 @@ show_no_slots_menu() {
     echo
     printf "To continue, you'll need an available container slot.\n"
     echo
-    printf "  ${CYAN}claudebox create${NC}  - Create a new slot\n"
-    printf "  ${CYAN}claudebox slots${NC}   - View existing slots\n"
+    printf '%b' "  ${CYAN}claudebox create${NC}  - Create a new slot\n"
+    printf '%b' "  ${CYAN}claudebox slots${NC}   - View existing slots\n"
     echo
-    printf "  ${DIM}Hint: Create multiple slots to run parallel authenticated${NC}\n"
-    printf "  ${DIM}Claude sessions in the same project.${NC}\n"
+    printf '%b' "  ${DIM}Hint: Create multiple slots to run parallel authenticated${NC}\n"
+    printf '%b' "  ${DIM}Claude sessions in the same project.${NC}\n"
     echo
     exit 1
 }
@@ -185,10 +191,12 @@ show_help() {
 show_claude_help() {
     if [[ -n "${IMAGE_NAME:-}" ]] && docker image inspect "$IMAGE_NAME" &>/dev/null; then
         # Get Claude's help and just change claude to claudebox in the header
-        local claude_help=$(docker run --rm "$IMAGE_NAME" claude --help 2>&1 | grep -v "iptables")
+        local claude_help
+        claude_help=$(docker run --rm "$IMAGE_NAME" claude --help 2>&1 | grep -v "iptables")
         
         # Just change claude to claudebox in the first line
-        local processed_help=$(echo "$claude_help" | sed '1s/claude/claudebox/g')
+        local processed_help
+        processed_help=$(echo "$claude_help" | sed '1s/claude/claudebox/g')
         
         # Output everything at once
         echo
@@ -204,10 +212,12 @@ show_claude_help() {
 show_full_help() {
     if [[ -n "${IMAGE_NAME:-}" ]] && docker image inspect "$IMAGE_NAME" &>/dev/null; then
         # Get Claude's help and blend our additions
-        local claude_help=$(docker run --rm "$IMAGE_NAME" claude --help 2>&1 | grep -v "iptables")
+        local claude_help
+        claude_help=$(docker run --rm "$IMAGE_NAME" claude --help 2>&1 | grep -v "iptables")
         
         # Process and combine everything in memory
-        local full_help=$(echo "$claude_help" | \
+        local full_help
+        full_help=$(echo "$claude_help" | \
             sed '1s/claude/claudebox/g' | \
             sed '/^Commands:/i\
   --verbose                        Show detailed output\
@@ -240,7 +250,7 @@ show_full_help() {
         echo "$full_help"
     else
         # No Docker image - show compact menu (same as show_help)
-        show_help
+        show_help "" ""
     fi
 }
 
@@ -256,7 +266,7 @@ _forward_to_container() {
 dispatch_command() {
     local cmd="${1:-}"; shift || true
     if [[ "$VERBOSE" == "true" ]]; then
-        echo "[DEBUG] dispatch_command called with: cmd='$cmd' remaining args='$@'" >&2
+        echo "[DEBUG] dispatch_command called with: cmd='$cmd' remaining args='$*'" >&2
     fi
     
     case "${cmd}" in
@@ -277,7 +287,6 @@ dispatch_command() {
         slots)            _cmd_slots "$@" ;;
         slot)             _cmd_slot "$@" ;;
         revoke)           _cmd_revoke "$@" ;;
-        kill)             _cmd_kill "$@" ;;
         
         # Info commands
         projects)         _cmd_projects "$@" ;;

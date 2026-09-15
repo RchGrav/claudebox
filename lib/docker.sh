@@ -17,7 +17,13 @@ install_docker() {
 
     info "Installing Docker..."
 
-    [[ -f /etc/os-release ]] && . /etc/os-release || error "Cannot detect OS"
+    if [[ -f /etc/os-release ]]; then
+        if ! . /etc/os-release; then
+            error "Cannot detect OS"
+        fi
+    else
+        error "Cannot detect OS"
+    fi
 
     case "${ID:-}" in
         ubuntu|debian)
@@ -154,7 +160,8 @@ run_claudebox_container() (
         tmux_socket_dir=$(dirname "$tmux_socket")
     else
         # Look for existing tmux socket or determine where to create one
-        local uid=$(id -u)
+        local uid
+        uid=$(id -u)
         local default_socket_dir="/tmp/tmux-$uid"
         
         # Check common locations for existing sockets
@@ -219,7 +226,7 @@ run_claudebox_container() (
     docker_args+=(
         -w /workspace
         -v "$PROJECT_DIR":/workspace
-        -v "$PROJECT_PARENT_DIR":/home/$DOCKER_USER/.claudebox
+        -v "$PROJECT_PARENT_DIR:/home/$DOCKER_USER/.claudebox"
     )
     
     # Ensure .claude directory exists
@@ -227,18 +234,18 @@ run_claudebox_container() (
         mkdir -p "$PROJECT_SLOT_DIR/.claude"
     fi
     
-    docker_args+=(-v "$PROJECT_SLOT_DIR/.claude":/home/$DOCKER_USER/.claude)
+    docker_args+=(-v "$PROJECT_SLOT_DIR/.claude:/home/$DOCKER_USER/.claude")
     
     # Mount .claude.json only if it already exists (from previous session)
     if [[ -f "$PROJECT_SLOT_DIR/.claude.json" ]]; then
-        docker_args+=(-v "$PROJECT_SLOT_DIR/.claude.json":/home/$DOCKER_USER/.claude.json)
+        docker_args+=(-v "$PROJECT_SLOT_DIR/.claude.json:/home/$DOCKER_USER/.claude.json")
     fi
     
     # Mount .config directory
-    docker_args+=(-v "$PROJECT_SLOT_DIR/.config":/home/$DOCKER_USER/.config)
+    docker_args+=(-v "$PROJECT_SLOT_DIR/.config:/home/$DOCKER_USER/.config")
     
     # Mount .cache directory
-    docker_args+=(-v "$PROJECT_SLOT_DIR/.cache":/home/$DOCKER_USER/.cache)
+    docker_args+=(-v "$PROJECT_SLOT_DIR/.cache:/home/$DOCKER_USER/.cache")
     
     # The shared project venv must see the same managed Python in every slot.
     # Mount only interpreters so image-provided uv tools remain visible.
@@ -296,7 +303,8 @@ run_claudebox_container() (
         local temp_file="$2"
         
         # Create temporary file with unique name
-        local mcp_file=$(mktemp /tmp/claudebox-mcp-$(date +%s)-$$.json 2>/dev/null || mktemp)
+        local mcp_file
+        mcp_file=$(mktemp "/tmp/claudebox-mcp-$(date +%s)-$$.json" 2>/dev/null || mktemp)
         mcp_temp_files+=("$mcp_file")
         
         # Extract mcpServers if they exist
@@ -323,6 +331,8 @@ run_claudebox_container() (
     declare -a mcp_temp_files=()
     
     # Set up cleanup trap for temporary MCP config files
+    # Invoked by the EXIT trap in this subshell; exercised by test_runtime_regressions.sh.
+    # shellcheck disable=SC2317
     cleanup_mcp_files() {
         local file
         # Check if array exists and has elements (set -u safe)
@@ -347,7 +357,8 @@ run_claudebox_container() (
         user_mcp_file=$(create_mcp_config_file "$HOME/.claude.json" "")
         
         if [[ -n "$user_mcp_file" ]]; then
-            local user_count=$(jq '.mcpServers | length' "$user_mcp_file" 2>/dev/null || echo "0")
+            local user_count
+            user_count=$(jq '.mcpServers | length' "$user_mcp_file" 2>/dev/null || echo "0")
             if [[ "$user_count" -gt 0 ]]; then
                 if [[ "$VERBOSE" == "true" ]]; then
                     printf "Found %s user MCP servers\n" "$user_count" >&2
@@ -365,7 +376,8 @@ run_claudebox_container() (
     
     # Create project MCP config file by merging project configs
     # Start with empty config file for merging
-    local temp_project_file=$(mktemp /tmp/claudebox-project-temp-$(date +%s)-$$.json 2>/dev/null || mktemp)
+    local temp_project_file
+    temp_project_file=$(mktemp "/tmp/claudebox-project-temp-$(date +%s)-$$.json" 2>/dev/null || mktemp)
     mcp_temp_files+=("$temp_project_file")
     echo '{"mcpServers":{}}' > "$temp_project_file"
     
@@ -387,7 +399,8 @@ run_claudebox_container() (
     fi
     
     # Check if we have any project servers
-    local project_count=$(jq '.mcpServers | length' "$temp_project_file" 2>/dev/null || echo "0")
+    local project_count
+    project_count=$(jq '.mcpServers | length' "$temp_project_file" 2>/dev/null || echo "0")
     if [[ "$project_count" -gt 0 ]]; then
         project_mcp_file="$temp_project_file"
         if [[ "$VERBOSE" == "true" ]]; then
@@ -404,14 +417,10 @@ run_claudebox_container() (
     
     
     # Add environment variables
-    local project_name=$(basename "$PROJECT_DIR")
-    local slot_name=$(basename "$PROJECT_SLOT_DIR")
-    
-    # Calculate slot index for hostname
-    local slot_index=1  # default if we can't determine
-    if [[ -n "$PROJECT_PARENT_DIR" ]] && [[ -n "$slot_name" ]]; then
-        slot_index=$(get_slot_index "$slot_name" "$PROJECT_PARENT_DIR" 2>/dev/null || echo "1")
-    fi
+    local project_name
+    project_name=$(basename "$PROJECT_DIR")
+    local slot_name
+    slot_name=$(basename "$PROJECT_SLOT_DIR")
     
     if [[ -n "${ANTHROPIC_API_KEY+x}" ]]; then
         docker_args+=(-e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY")
@@ -474,7 +483,7 @@ run_docker_build() {
     
     docker build \
         $no_cache_flag \
-        --progress=${BUILDKIT_PROGRESS:-auto} \
+        --progress="${BUILDKIT_PROGRESS:-auto}" \
         --build-arg BUILDKIT_INLINE_CACHE=1 \
         --build-arg USER_ID="$USER_ID" \
         --build-arg GROUP_ID="$GROUP_ID" \

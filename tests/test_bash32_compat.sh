@@ -11,7 +11,6 @@ echo
 # Colors (these should work in Bash 3.2)
 RED='\033[0;31m'
 GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
 NC='\033[0m'
 
 # Test counter
@@ -21,19 +20,19 @@ TESTS_PASSED=0
 # Test function
 run_test() {
     local test_name="$1"
-    local test_cmd="$2"
+    shift
     
     TESTS_RUN=$((TESTS_RUN + 1))
     echo -n "Test $TESTS_RUN: $test_name... "
     
-    if eval "$test_cmd" >/dev/null 2>&1; then
+    if "$@" >/dev/null 2>&1; then
         echo -e "${GREEN}PASS${NC}"
         TESTS_PASSED=$((TESTS_PASSED + 1))
         return 0
     else
         echo -e "${RED}FAIL${NC}"
         echo "  Error output:"
-        eval "$test_cmd" 2>&1 | sed 's/^/    /'
+        "$@" 2>&1 | sed 's/^/    /'
         return 1
     fi
 }
@@ -59,7 +58,8 @@ run_test "Source profile functions" test_basic_sourcing
 # Test 2: get_profile_packages
 test_get_packages() {
     eval "$PROFILE_FUNCS"
-    local result=$(get_profile_packages "core")
+    local result
+    result=$(get_profile_packages "core")
     [[ -n "$result" ]] && [[ "$result" == *"gcc"* ]]
 }
 run_test "get_profile_packages()" test_get_packages
@@ -67,7 +67,8 @@ run_test "get_profile_packages()" test_get_packages
 # Test 3: get_profile_description
 test_get_description() {
     eval "$PROFILE_FUNCS"
-    local result=$(get_profile_description "python")
+    local result
+    result=$(get_profile_description "python")
     [[ "$result" == "Python Development (managed via uv)" ]]
 }
 run_test "get_profile_description()" test_get_description
@@ -75,8 +76,10 @@ run_test "get_profile_description()" test_get_description
 # Test 4: get_all_profile_names
 test_get_all_names() {
     eval "$PROFILE_FUNCS"
-    local result=$(get_all_profile_names)
-    local count=$(echo "$result" | wc -w)
+    local result
+    result=$(get_all_profile_names)
+    local count
+    count=$(echo "$result" | wc -w)
     local name
     [[ $count -ge 20 ]] || return 1
     for name in $result; do
@@ -101,7 +104,8 @@ test_profiles_pattern() {
     eval "$PROFILE_FUNCS"
     local output=""
     for profile in $(get_all_profile_names | tr ' ' '\n' | sort); do
-        local desc=$(get_profile_description "$profile")
+        local desc
+        desc=$(get_profile_description "$profile")
         output="${output}${profile} - ${desc}\n"
     done
     [[ -n "$output" ]]
@@ -112,7 +116,8 @@ run_test "Profiles listing pattern" test_profiles_pattern
 test_dockerfile_pattern() {
     eval "$PROFILE_FUNCS"
     local profile="core"
-    local packages=$(get_profile_packages "$profile")
+    local packages
+    packages=$(get_profile_packages "$profile")
     local pkg_list
     IFS=' ' read -ra pkg_list <<< "$packages"
     [[ ${#pkg_list[@]} -gt 0 ]]
@@ -122,7 +127,8 @@ run_test "Dockerfile generation pattern" test_dockerfile_pattern
 # Test 8: Empty profile handling
 test_empty_profile() {
     eval "$PROFILE_FUNCS"
-    local packages=$(get_profile_packages "python")
+    local packages
+    packages=$(get_profile_packages "python")
     [[ -z "$packages" ]]
 }
 run_test "Empty profile handling" test_empty_profile
@@ -130,7 +136,8 @@ run_test "Empty profile handling" test_empty_profile
 # Test 9: Invalid profile handling
 test_invalid_profile() {
     eval "$PROFILE_FUNCS"
-    local packages=$(get_profile_packages "nonexistent")
+    local packages
+    packages=$(get_profile_packages "nonexistent")
     [[ -z "$packages" ]]
 }
 run_test "Invalid profile handling" test_invalid_profile
@@ -147,7 +154,7 @@ run_test "No associative arrays" test_no_associative_arrays
 
 # Test 11: No ${var^^} uppercase
 test_no_uppercase_expansion() {
-    ! grep -q '\${[^}]*\^\^}' "$CONFIG_SCRIPT"
+    ! grep -q "\\\${[^}]*\\^\\^}" "$CONFIG_SCRIPT"
 }
 run_test "No \${var^^} syntax" test_no_uppercase_expansion
 
@@ -185,7 +192,6 @@ echo
 if [[ $TESTS_PASSED -eq $TESTS_RUN ]]; then
     echo -e "${GREEN}All tests passed! ✓${NC}"
     echo "The script should work with Bash 3.2"
-    exit 0
 else
     echo -e "${RED}Some tests failed ✗${NC}"
     echo "There may be compatibility issues"

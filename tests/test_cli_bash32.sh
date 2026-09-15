@@ -14,7 +14,9 @@ trap 'rm -rf "$SANDBOX"' EXIT
 export HOME="$SANDBOX/home"
 mkdir -p "$HOME/.local/bin" "$SANDBOX/project"
 export PATH="$HOME/.local/bin:$PATH"
-cd "$SANDBOX/project"
+if ! cd "$SANDBOX/project"; then
+    exit 1
+fi
 
 # add/remove run the Docker preflight before touching the profile file.
 # A stub that answers "info" and "--version" lets them reach that code
@@ -46,7 +48,7 @@ run_case() {
     TESTS_RUN=$((TESTS_RUN + 1))
     printf 'Test %d: %s... ' "$TESTS_RUN" "$name"
 
-    output="$(bash "$MAIN" "$@" 2>&1 </dev/null)"
+    output="$("$BASH" "$MAIN" "$@" 2>&1 </dev/null)"
     status=$?
 
     if printf '%s' "$output" | grep -q 'unbound variable'; then
@@ -98,7 +100,7 @@ check_profile_file() {
 
 # First run only updates the symlink and prints PATH advice; do it once so
 # the cases below reach the CLI parser.
-bash "$MAIN" help >/dev/null 2>&1 </dev/null || true
+"$BASH" "$MAIN" help >/dev/null 2>&1 </dev/null || true
 
 run_case "no arguments"        no
 run_case "help"                yes help

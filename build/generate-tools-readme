@@ -16,6 +16,7 @@ if [[ -z "$TOOLS_REPORT_FILE" ]]; then
 fi
 
 # Source the tools report module
+# shellcheck source=lib/tools-report.sh
 source "$TOOLS_REPORT_FILE"
 
 # Generate the report

@@ -26,20 +26,15 @@ FAILED=0
 # Run the test scripts in Bash 3.2
 echo "Running tests in Bash 3.2..."
 echo
-if ! docker run --rm \
-    -v "$PARENT_DIR":/workspace \
-    bash:3.2 \
-    bash /workspace/tests/test_bash32_compat.sh; then
-    FAILED=1
-fi
-
-echo
-if ! docker run --rm \
-    -v "$PARENT_DIR":/workspace \
-    bash:3.2 \
-    bash /workspace/tests/test_cli_bash32.sh; then
-    FAILED=1
-fi
+for script in test_bash32_compat.sh test_cli_bash32.sh test_shell_robustness.sh \
+    test_python_install_status.sh test_shell_output.sh test_installer_checksum.sh; do
+    if ! docker run --rm \
+        -v "$PARENT_DIR":/workspace \
+        bash:3.2 \
+        bash "/workspace/tests/$script"; then
+        FAILED=1
+    fi
+done
 
 # Also test with Bash 4+ for comparison
 echo
@@ -47,13 +42,12 @@ echo "=========================================="
 echo "Running same tests in Bash 4+ for comparison..."
 echo "=========================================="
 echo
-if ! bash "$SCRIPT_DIR/test_bash32_compat.sh"; then
-    FAILED=1
-fi
-echo
-if ! bash "$SCRIPT_DIR/test_cli_bash32.sh"; then
-    FAILED=1
-fi
+for script in test_bash32_compat.sh test_cli_bash32.sh test_shell_robustness.sh \
+    test_python_install_status.sh test_shell_output.sh test_installer_checksum.sh; do
+    if ! bash "$SCRIPT_DIR/$script"; then
+        FAILED=1
+    fi
+done
 
 # Clean up the Bash 3.2 image
 echo

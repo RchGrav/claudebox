@@ -51,11 +51,14 @@ _cmd_kill() {
         # Kill ALL claudebox containers
         info "Killing all ClaudeBox containers..."
         
-        local containers=$(docker ps --filter "name=^claudebox-" --format "{{.Names}}")
+        local containers
+        containers=$(docker ps --filter "name=^claudebox-" --format "{{.Names}}")
         if [[ -n "$containers" ]]; then
             while IFS= read -r container; do
                 if [[ -n "$container" ]]; then
-                    docker stop "$container" >/dev/null 2>&1 && ((killed_containers++)) || true
+                    if docker stop "$container" >/dev/null 2>&1; then
+                        killed_containers=$((killed_containers + 1))
+                    fi
                 fi
             done <<< "$containers"
             success "Stopped $killed_containers container(s)"
@@ -86,7 +89,8 @@ _cmd_kill() {
         fi
     else
         # No argument - show active containers
-        local containers=$(docker ps --filter "name=^claudebox-" --format "{{.Names}}")
+        local containers
+        containers=$(docker ps --filter "name=^claudebox-" --format "{{.Names}}")
         
         if [[ -z "$containers" ]]; then
             info "No active ClaudeBox containers"
@@ -101,7 +105,7 @@ _cmd_kill() {
         echo "$containers" | while IFS= read -r container; do
             local slot_hash=${container##*-}
             local project_part=${container#claudebox-}
-            project_part=${project_part%-$slot_hash}
+            project_part=${project_part%-"$slot_hash"}
             echo "  $slot_hash - $project_part"
         done
         echo
@@ -129,13 +133,16 @@ _cmd_tmux() {
         local authenticated_count=0
         
         # Get project folder name for current directory
-        local project_folder_name=$(generate_parent_folder_name "$PROJECT_DIR" 2>/dev/null || echo "")
+        local project_folder_name
+        project_folder_name=$(generate_parent_folder_name "$PROJECT_DIR" 2>/dev/null || echo "")
         local parent_dir="$HOME/.claudebox/projects/$project_folder_name"
         
         if [[ -n "$project_folder_name" ]] && [[ -d "$parent_dir" ]]; then
-            local max_slot=$(read_counter "$parent_dir" 2>/dev/null || echo "0")
+            local max_slot
+            max_slot=$(read_counter "$parent_dir" 2>/dev/null || echo "0")
             for ((idx=1; idx<=max_slot; idx++)); do
-                local slot_name=$(generate_container_name "$PROJECT_DIR" "$idx")
+                local slot_name
+                slot_name=$(generate_container_name "$PROJECT_DIR" "$idx")
                 local slot_dir="$parent_dir/$slot_name"
                 
                 if [[ -d "$slot_dir" ]]; then
@@ -185,22 +192,28 @@ _cmd_tmux() {
             info "Killing ALL ClaudeBox tmux sessions and containers..."
             
             # Get all claudebox tmux sessions
-            local sessions=$(tmux list-sessions -F "#{session_name}" 2>/dev/null | grep "^claudebox-" || true)
+            local sessions
+            sessions=$(tmux list-sessions -F "#{session_name}" 2>/dev/null | grep "^claudebox-" || true)
             
             if [[ -n "$sessions" ]]; then
                 while IFS= read -r session; do
                     if [[ -n "$session" ]]; then
-                        tmux kill-session -t "$session" 2>/dev/null && ((killed_sessions++)) || true
+                        if tmux kill-session -t "$session" 2>/dev/null; then
+                            killed_sessions=$((killed_sessions + 1))
+                        fi
                     fi
                 done <<< "$sessions"
             fi
             
             # Kill ALL claudebox containers
-            local containers=$(docker ps --filter "name=^claudebox-" --format "{{.Names}}")
+            local containers
+            containers=$(docker ps --filter "name=^claudebox-" --format "{{.Names}}")
             if [[ -n "$containers" ]]; then
                 while IFS= read -r container; do
                     if [[ -n "$container" ]]; then
-                        docker stop "$container" >/dev/null 2>&1 && ((killed_containers++)) || true
+                        if docker stop "$container" >/dev/null 2>&1; then
+                            killed_containers=$((killed_containers + 1))
+                        fi
                     fi
                 done <<< "$containers"
             fi
@@ -219,8 +232,10 @@ _cmd_tmux() {
         elif [[ -z "$session_arg" ]]; then
             # No argument - show the menu (moved this up to catch empty args)
             # Show menu of active sessions
-            local sessions=$(tmux list-sessions -F "#{session_name}" 2>/dev/null | grep "^claudebox-" || true)
-            local containers=$(docker ps --filter "name=^claudebox-" --format "{{.Names}}")
+            local sessions
+            sessions=$(tmux list-sessions -F "#{session_name}" 2>/dev/null | grep "^claudebox-" || true)
+            local containers
+            containers=$(docker ps --filter "name=^claudebox-" --format "{{.Names}}")
             
             if [[ -z "$sessions" ]] && [[ -z "$containers" ]]; then
                 info "No active ClaudeBox sessions or containers"
@@ -236,11 +251,11 @@ _cmd_tmux() {
                 cecho "Tmux Sessions:" "$GREEN"
                 echo "$sessions" | while IFS= read -r session; do
                     # Extract project name from session
-                    local proj_name=${session#claudebox-}
                     echo "  $session"
                     
                     # Show containers for this session
-                    local session_containers=$(echo "$containers" | grep "^$session-" || true)
+                    local session_containers
+                    session_containers=$(echo "$containers" | grep "^$session-" || true)
                     if [[ -n "$session_containers" ]]; then
                         echo "$session_containers" | while IFS= read -r container; do
                             local slot_hash=${container##*-}
@@ -255,7 +270,8 @@ _cmd_tmux() {
             local orphans=""
             if [[ -n "$containers" ]] && [[ -n "$sessions" ]]; then
                 # Build pattern from sessions
-                local pattern=$(echo "$sessions" | sed 's/^/^/' | sed 's/$/-/' | tr '\n' '|' | sed 's/|$//')
+                local pattern
+                pattern=$(echo "$sessions" | sed 's/^/^/' | sed 's/$/-/' | tr '\n' '|' | sed 's/|$//')
                 orphans=$(echo "$containers" | grep -v -E "$pattern" || true)
             elif [[ -n "$containers" ]]; then
                 # No sessions, all containers are orphans
@@ -281,7 +297,8 @@ _cmd_tmux() {
             # Check if this looks like a container hash (8 hex chars)
             if [[ "$session_arg" =~ ^[a-f0-9]{8}$ ]]; then
                 # This is a container hash - kill just that container (Lost Boys child rule)
-                local matching_container=$(docker ps --filter "name=claudebox-.*-$session_arg$" --format "{{.Names}}" | head -1)
+                local matching_container
+                matching_container=$(docker ps --filter "name=claudebox-.*-$session_arg$" --format "{{.Names}}" | head -1)
                 
                 if [[ -n "$matching_container" ]]; then
                     info "Killing container: $matching_container"
@@ -299,7 +316,8 @@ _cmd_tmux() {
                 fi
             else
                 # Not a container hash - look for session matches (Lost Boys parent rule)
-                local matching_sessions=$(tmux list-sessions -F "#{session_name}" 2>/dev/null | grep "claudebox-.*$session_arg" || true)
+                local matching_sessions
+                matching_sessions=$(tmux list-sessions -F "#{session_name}" 2>/dev/null | grep "claudebox-.*$session_arg" || true)
                 local match_count=0
                 if [[ -n "$matching_sessions" ]]; then
                     match_count=$(echo "$matching_sessions" | wc -l | tr -d ' ')
@@ -329,12 +347,15 @@ _cmd_tmux() {
                 local session_name="$matching_sessions"
                 
                 # Kill ALL containers for this session (all children die with parent)
-                local containers=$(docker ps --filter "name=^$session_name-" --format "{{.Names}}")
+                local containers
+                containers=$(docker ps --filter "name=^$session_name-" --format "{{.Names}}")
                 if [[ -n "$containers" ]]; then
                     info "Stopping all containers for session: $session_name"
                     while IFS= read -r container; do
                         if [[ -n "$container" ]]; then
-                            docker stop "$container" >/dev/null 2>&1 && ((killed_containers++)) || true
+                            if docker stop "$container" >/dev/null 2>&1; then
+                                killed_containers=$((killed_containers + 1))
+                            fi
                         fi
                     done <<< "$containers"
                 fi
@@ -378,7 +399,6 @@ Please install tmux first:
     # Parse layout parameter if provided
     local layout="${1:-}"
     local total_slots_needed=1
-    local window_configs=()
     
     # Collect all numeric arguments for layout
     local window_panes=()
@@ -438,8 +458,10 @@ Current directory: $PWD"
     
     
     # Generate container name
-    local slot_name=$(basename "$PROJECT_SLOT_DIR")
-    local parent_folder_name=$(generate_parent_folder_name "$PROJECT_DIR")
+    local slot_name
+    slot_name=$(basename "$PROJECT_SLOT_DIR")
+    local parent_folder_name
+    parent_folder_name=$(generate_parent_folder_name "$PROJECT_DIR")
     local container_name="claudebox-${parent_folder_name}-${slot_name}"
     
     # Check if we're already in a tmux session
@@ -453,10 +475,12 @@ Current directory: $PWD"
                 
                 # Get available slots (not currently running)
                 local available_slots=()
-                local max_slot=$(read_counter "$PROJECT_PARENT_DIR")
+                local max_slot
+                max_slot=$(read_counter "$PROJECT_PARENT_DIR")
                 
                 for ((idx=1; idx<=max_slot; idx++)); do
-                    local slot_name=$(generate_container_name "$PROJECT_DIR" "$idx")
+                    local slot_name
+                    slot_name=$(generate_container_name "$PROJECT_DIR" "$idx")
                     local slot_dir="$PROJECT_PARENT_DIR/$slot_name"
                     
                     # Check if slot exists and is not currently running
@@ -471,7 +495,8 @@ Current directory: $PWD"
                 # Simple layout - use quick tmux without persistent session
                 if [[ "$layout" =~ ^[0-9]+$ ]] && [[ $layout -le 4 ]]; then
                     # For simple layouts (1-4 panes), create non-persistent session
-                    local session_name="claudebox-$(basename "$PROJECT_DIR")"
+                    local session_name
+                    session_name="claudebox-$(basename "$PROJECT_DIR")"
                     local captured_panes=()
                     
                     # Create first pane and capture its ID atomically
@@ -483,7 +508,8 @@ Current directory: $PWD"
                     tmux rename-window -t "$session_name" 'ClaudeBox Multi'
                     
                     # Get the first pane ID (session creation always creates exactly one pane)
-                    local first_pane_id=$(tmux display -t "$session_name:0.0" -p '#{pane_id}')
+                    local first_pane_id
+                    first_pane_id=$(tmux display -t "$session_name:0.0" -p '#{pane_id}')
                     captured_panes+=("$first_pane_id")
                     
                     if [[ "$VERBOSE" == "true" ]]; then
@@ -492,11 +518,12 @@ Current directory: $PWD"
                     
                     # Create additional panes one by one and capture their IDs atomically
                     local slot_index=1
-                    for ((i=1; i<$layout; i++)); do
+                    for ((i=1; i<layout; i++)); do
                         local slot="${available_slots[$slot_index]}"
                         
                         # Split and create new pane - capture ID atomically with -P -F
-                        local new_pane_id=$(tmux split-window -t "$session_name" -e "CLAUDEBOX_SLOT_NUMBER=$slot" -P -F '#{pane_id}' "$SCRIPT_PATH slot $slot")
+                        local new_pane_id
+                        new_pane_id=$(tmux split-window -t "$session_name" -e "CLAUDEBOX_SLOT_NUMBER=$slot" -P -F '#{pane_id}' "$SCRIPT_PATH slot $slot")
                         
                         captured_panes+=("$new_pane_id")
                         if [[ "$VERBOSE" == "true" ]]; then
@@ -525,7 +552,8 @@ Current directory: $PWD"
                     for ((i=0; i<${#captured_panes[@]}; i++)); do
                         local pane_id="${captured_panes[$i]}"
                         local slot_num="${available_slots[$i]}"
-                        local slot_name=$(generate_container_name "$PROJECT_DIR" "$slot_num")
+                        local slot_name
+                        slot_name=$(generate_container_name "$PROJECT_DIR" "$slot_num")
                         local slot_dir="$PROJECT_PARENT_DIR/$slot_name"
                         
                         # Check if this slot is authenticated
@@ -552,7 +580,8 @@ Current directory: $PWD"
                     exit 0
                 else
                     # Complex layout - multiple windows/panes
-                    local session_name="claudebox-$(basename "$PROJECT_DIR")"
+                    local session_name
+                    session_name="claudebox-$(basename "$PROJECT_DIR")"
                     local captured_panes=()
                     local slot_index=0
                     local first_created=false
@@ -572,7 +601,8 @@ Current directory: $PWD"
                                 tmux rename-window -t "$session_name" 'ClaudeBox Multi'
                                 
                                 # Get the first pane ID (session creation always creates exactly one pane)
-                                local first_pane_id=$(tmux display -t "$session_name:0.0" -p '#{pane_id}')
+                                local first_pane_id
+                                first_pane_id=$(tmux display -t "$session_name:0.0" -p '#{pane_id}')
                                 captured_panes+=("$first_pane_id")
                                 
                                 if [[ "$VERBOSE" == "true" ]]; then
@@ -582,7 +612,8 @@ Current directory: $PWD"
                                 first_created=true
                             else
                                 # Split and create new pane - capture ID atomically with -P -F
-                                local new_pane_id=$(tmux split-window -t "$session_name" -e "CLAUDEBOX_SLOT_NUMBER=$slot" -P -F '#{pane_id}' "$SCRIPT_PATH slot $slot")
+                                local new_pane_id
+                                new_pane_id=$(tmux split-window -t "$session_name" -e "CLAUDEBOX_SLOT_NUMBER=$slot" -P -F '#{pane_id}' "$SCRIPT_PATH slot $slot")
                                 
                                 captured_panes+=("$new_pane_id")
                                 if [[ "$VERBOSE" == "true" ]]; then
@@ -610,9 +641,10 @@ Current directory: $PWD"
                     local wait_count=0
                     while [[ "$all_ready" == "false" ]] && [[ $wait_count -lt 30 ]]; do
                         all_ready=true
-                        for ((idx=0; idx<$slot_index; idx++)); do
+                        for ((idx=0; idx<slot_index; idx++)); do
                             local slot="${available_slots[$idx]}"
-                            local slot_name=$(generate_container_name "$PROJECT_DIR" "$slot")
+                            local slot_name
+                            slot_name=$(generate_container_name "$PROJECT_DIR" "$slot")
                             
                             # Check if container is running - exactly like slots command
                             if ! docker ps --format "{{.Names}}" | grep -q "^claudebox-.*-${slot_name}$"; then
@@ -638,7 +670,8 @@ Current directory: $PWD"
                     for ((i=0; i<${#captured_panes[@]}; i++)); do
                         local pane_id="${captured_panes[$i]}"
                         local slot_num="${available_slots[$i]}"
-                        local slot_name=$(generate_container_name "$PROJECT_DIR" "$slot_num")
+                        local slot_name
+                        slot_name=$(generate_container_name "$PROJECT_DIR" "$slot_num")
                         local slot_dir="$PROJECT_PARENT_DIR/$slot_name"
                         
                         # Check if this slot is authenticated
@@ -681,21 +714,25 @@ _cmd_project() {
     fi
     
     # Convert search to lowercase for case-insensitive matching
-    local search_lower=$(echo "$search" | tr '[:upper:]' '[:lower:]')
+    local search_lower
+    search_lower=$(echo "$search" | tr '[:upper:]' '[:lower:]')
     local matches=()
     
     # Search through all project directories
     for parent_dir in "$HOME/.claudebox/projects"/*/ ; do
         [[ -d "$parent_dir" ]] || continue
         
-        local dir_name=$(basename "$parent_dir")
-        local dir_lower=$(echo "$dir_name" | tr '[:upper:]' '[:lower:]')
+        local dir_name
+        dir_name=$(basename "$parent_dir")
+        local dir_lower
+        dir_lower=$(echo "$dir_name" | tr '[:upper:]' '[:lower:]')
         
         # Check if search matches directory name (partial match)
         if [[ "$dir_lower" == *"$search_lower"* ]]; then
             # Read the actual project path
             if [[ -f "$parent_dir/.project_path" ]]; then
-                local project_path=$(cat "$parent_dir/.project_path")
+                local project_path
+                project_path=$(cat "$parent_dir/.project_path")
                 matches+=("$project_path|$dir_name")
             fi
         fi
@@ -707,7 +744,6 @@ _cmd_project() {
     elif [ ${#matches[@]} -eq 1 ]; then
         # Single match - use it
         local project_path="${matches[0]%%|*}"
-        local project_name="${matches[0]##*|}"
         
         #info "Opening project: $project_name"
         #info "Path: $project_path"
@@ -747,7 +783,8 @@ _cmd_special() {
     fi
     
     # Create temporary container
-    local project_folder_name=$(get_project_folder_name "$PROJECT_DIR")
+    local project_folder_name
+    project_folder_name=$(get_project_folder_name "$PROJECT_DIR")
     local temp_container="claudebox-temp-${project_folder_name}-$$"
     
     # Run container with all arguments passed through
@@ -788,7 +825,8 @@ _cmd_special() {
 
 _cmd_import() {
     local host_commands="$HOME/.claude/commands"
-    local parent_dir=$(get_parent_dir "$PROJECT_DIR")
+    local parent_dir
+    parent_dir=$(get_parent_dir "$PROJECT_DIR")
     local project_commands="$parent_dir/commands"
     
     # Check if host commands directory exists
@@ -822,7 +860,7 @@ _cmd_import() {
     echo
     
     # Get user selection
-    read -p "Select command(s) to import (number, 'a' for all, or 'q' to quit): " selection
+    read -r -p "Select command(s) to import (number, 'a' for all, or 'q' to quit): " selection
     
     case "$selection" in
         q|Q)
@@ -890,7 +928,8 @@ _install_tmux_conf() {
     
     # Backup existing config if it exists
     if [[ -f "$user_tmux_conf" ]]; then
-        local timestamp=$(date +%Y%m%d_%H%M%S)
+        local timestamp
+        timestamp=$(date +%Y%m%d_%H%M%S)
         local backup_file="$user_tmux_conf.backup_$timestamp"
         
         info "Backing up existing tmux configuration..."

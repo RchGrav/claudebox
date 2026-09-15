@@ -68,7 +68,8 @@ setup_shared_commands() {
         # For existing files, only update if source is newer
         for file in "$commands_source"/*; do
             if [[ -f "$file" ]]; then
-                local basename=$(basename "$file")
+                local basename
+                basename=$(basename "$file")
                 local dest_file="$shared_commands/$basename"
                 if [[ -f "$dest_file" ]] && [[ "$file" -nt "$dest_file" ]]; then
                     cp "$file" "$dest_file"
@@ -137,7 +138,8 @@ calculate_docker_layer_checksums() {
     local combined_content=""
     for file in "$root_dir/build/docker-entrypoint" "$root_dir/build/init-firewall"; do
         if [[ -f "$file" ]]; then
-            local file_md5=$(md5_file "$file")
+            local file_md5
+            file_md5=$(md5_file "$file")
             if [[ "$VERBOSE" == "true" ]]; then
                 echo "[DEBUG] File: $file, MD5: $file_md5" >&2
             fi
@@ -190,7 +192,8 @@ needs_docker_rebuild() {
     fi
     
     # Calculate current layer checksums
-    local current_checksums=$(calculate_docker_layer_checksums "$project_dir")
+    local current_checksums
+    current_checksums=$(calculate_docker_layer_checksums "$project_dir")
     
     # If no checksum file, need rebuild
     if [[ ! -f "$checksum_file" ]]; then
@@ -201,7 +204,8 @@ needs_docker_rebuild() {
     fi
     
     # Compare layer checksums
-    local stored_checksums=$(cat "$checksum_file" 2>/dev/null || echo "")
+    local stored_checksums
+    stored_checksums=$(cat "$checksum_file" 2>/dev/null || echo "")
     if [[ "$current_checksums" != "$stored_checksums" ]]; then
         if [[ "$VERBOSE" == "true" ]]; then
             echo "[DEBUG] Layer checksums changed, rebuild needed" >&2
@@ -216,7 +220,8 @@ needs_docker_rebuild() {
             while IFS= read -r current_line; do
                 local layer="${current_line%%:*}"
                 local current_hash="${current_line#*:}"
-                local stored_hash=$(echo "$stored_checksums" | grep "^$layer:" | cut -d: -f2)
+                local stored_hash
+                stored_hash=$(printf '%s\n' "$stored_checksums" | awk -F: -v layer="$layer" '$1 == layer {print $2}')
                 if [[ "$current_hash" != "$stored_hash" ]]; then
                     echo "[DEBUG]   $layer: $stored_hash → $current_hash" >&2
                     if [[ "$layer" == "dockerfile" ]] || [[ "$layer" == "scripts" ]]; then
@@ -229,7 +234,8 @@ needs_docker_rebuild() {
             while IFS= read -r current_line; do
                 local layer="${current_line%%:*}"
                 local current_hash="${current_line#*:}"
-                local stored_hash=$(echo "$stored_checksums" | grep "^$layer:" | cut -d: -f2)
+                local stored_hash
+                stored_hash=$(printf '%s\n' "$stored_checksums" | awk -F: -v layer="$layer" '$1 == layer {print $2}')
                 if [[ "$current_hash" != "$stored_hash" ]]; then
                     if [[ "$layer" == "dockerfile" ]] || [[ "$layer" == "scripts" ]]; then
                         templates_changed=true
@@ -261,12 +267,15 @@ save_docker_layer_checksums() {
     if [[ "$VERBOSE" == "true" ]]; then
         echo "[DEBUG] save_docker_layer_checksums called" >&2
     fi
-    local checksums=$(calculate_docker_layer_checksums "$project_dir")
+    local checksums
+    checksums=$(calculate_docker_layer_checksums "$project_dir")
     
     echo "$checksums" > "$checksum_file"
     if [[ "$VERBOSE" == "true" ]]; then
         echo "[DEBUG] Saved layer checksums to $checksum_file:" >&2
-        echo "$checksums" | sed 's/^/[DEBUG]   /' >&2
+        while IFS= read -r checksum_line; do
+            printf '[DEBUG]   %s\n' "$checksum_line" >&2
+        done <<< "$checksums"
     fi
 }
 

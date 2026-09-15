@@ -83,7 +83,6 @@ process_host_flags() {
 # "docker" - needs Docker running and will run container
 get_command_requirements() {
     local cmd="${1:-}"
-    local subcommand="${2:-}"
     
     case "$cmd" in
         # Pure host commands - no Docker or image needed
@@ -108,7 +107,8 @@ get_command_requirements() {
 # Legacy function for compatibility
 requires_docker_image() {
     local cmd="${1:-}"
-    local req=$(get_command_requirements "$cmd")
+    local req
+    req=$(get_command_requirements "$cmd")
     [[ "$req" == "docker" ]]
 }
 

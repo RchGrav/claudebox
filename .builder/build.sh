@@ -66,8 +66,8 @@ chmod +x "$OUTPUT"
 # Keep the archive (don't delete it)
 
 echo "✅ Files created:"
-echo "   📦 Installer: $OUTPUT ($(ls -lh "$OUTPUT" | awk '{print $5}'))"
-echo "   📄 Archive: $ARCHIVE ($(ls -lh "$ARCHIVE" | awk '{print $5}'))"
+echo "   📦 Installer: $OUTPUT ($(wc -c < "$OUTPUT" | tr -d ' ') bytes)"
+echo "   📄 Archive: $ARCHIVE ($(wc -c < "$ARCHIVE" | tr -d ' ') bytes)"
 echo "   🔐 SHA256: $SHA256"
 
 # Create a symlink from the root for backward compatibility

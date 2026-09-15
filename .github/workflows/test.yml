@@ -14,7 +14,7 @@ jobs:
         os: [ubuntu-latest, macos-latest]
         
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     
     - name: Run Bash 3.2 compatibility tests
       run: |
@@ -31,45 +31,50 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     
     - name: Install ShellCheck
       run: |
         sudo apt-get update
         sudo apt-get install -y shellcheck
         
-    - name: Run ShellCheck on main script
-      run: shellcheck -x main.sh
-      
-    - name: Run ShellCheck on library files
-      run: shellcheck -x lib/*.sh
-      
-    - name: Run ShellCheck on command modules
-      run: shellcheck -x lib/commands/*.sh
-      
+    - name: Run ShellCheck on all shell scripts
+      run: |
+        shellcheck -x main.sh lib/*.sh .builder/*.sh \
+          build/docker-entrypoint build/init-firewall build/generate-tools-readme \
+          tests/*.sh tooling/profiles/*.sh
+
   build:
     runs-on: ubuntu-latest
     needs: [test-compatibility, lint]
     
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     
     - name: Build installer
       run: |
         bash .builder/build.sh
         
-    - name: Verify installer was created
+    - name: Verify installer and checksum backends
       run: |
-        test -f claudebox
-        echo "Installer size: $(ls -lh claudebox | awk '{print $5}')"
-        
-    - name: Test installer in dev mode
+        test -x dist/claudebox.run
+        bash tests/test_installer_checksum.sh dist/claudebox.run
+
+    - name: Test installer in temporary directory
       run: |
-        # Should detect we're in a git repo and run directly
-        ./claudebox --help | grep "ClaudeBox"
-        
+        TEST_HOME=$(mktemp -d)
+        trap 'rm -rf "$TEST_HOME"' EXIT
+        export HOME="$TEST_HOME"
+        export PATH="$HOME/.local/bin:$PATH"
+        bash dist/claudebox.run profiles
+        test -f "$HOME/.claudebox/source/main.sh"
+        test -L "$HOME/.local/bin/claudebox"
+        bash dist/claudebox.run profiles
+        "$HOME/.local/bin/claudebox" profiles
+
     - name: Upload installer artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
-        name: claudebox-installer
-        path: claudebox
+        name: claudebox-tested-build
+        path: dist/claudebox.run
+        if-no-files-found: error

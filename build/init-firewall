@@ -40,11 +40,11 @@ if command -v ipset >/dev/null 2>&1; then
 
     for domain in $ALLOWED_DOMAINS; do
         if [[ "$domain" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$ ]]; then
-            ipset add allowed-ips $domain 2>/dev/null || true
+            ipset add allowed-ips "$domain" 2>/dev/null || true
         else
-            ips=$(getent hosts $domain 2>/dev/null | awk '{print $1}')
+            ips=$(getent hosts "$domain" 2>/dev/null | awk '{print $1}')
             for ip in $ips; do
-                ipset add allowed-domains $ip 2>/dev/null || true
+                ipset add allowed-domains "$ip" 2>/dev/null || true
             done
         fi
     done
@@ -53,11 +53,11 @@ if command -v ipset >/dev/null 2>&1; then
 else
     for domain in $ALLOWED_DOMAINS; do
         if [[ "$domain" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$ ]]; then
-            iptables -A OUTPUT -d $domain -j ACCEPT
+            iptables -A OUTPUT -d "$domain" -j ACCEPT
         else
-            ips=$(getent hosts $domain 2>/dev/null | awk '{print $1}')
+            ips=$(getent hosts "$domain" 2>/dev/null | awk '{print $1}')
             for ip in $ips; do
-                iptables -A OUTPUT -d $ip -j ACCEPT
+                iptables -A OUTPUT -d "$ip" -j ACCEPT
             done
         fi
     done

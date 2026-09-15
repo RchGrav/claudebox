@@ -9,7 +9,8 @@ preflight_check() {
     shift || true
     
     # First, check if we need a valid project for ANY Docker command
-    local project_folder_name=$(get_project_folder_name "$PROJECT_DIR" 2>/dev/null || echo "NONE")
+    local project_folder_name
+    project_folder_name=$(get_project_folder_name "$PROJECT_DIR" 2>/dev/null || echo "NONE")
     
     case "$cmd" in
         # Help always passes - no requirements
@@ -35,7 +36,8 @@ preflight_check() {
             if [[ "$cmd" == "slot" ]]; then
                 local slot_num="${1:-}"
                 if [[ -n "$slot_num" ]]; then
-                    local slot_dir=$(get_slot_dir "$PROJECT_DIR" "$slot_num" 2>/dev/null || echo "")
+                    local slot_dir
+                    slot_dir=$(get_slot_dir "$PROJECT_DIR" "$slot_num" 2>/dev/null || echo "")
                     if [[ -z "$slot_dir" ]] || [[ ! -d "$slot_dir" ]]; then
                         error "Slot $slot_num does not exist. Run 'claudebox slots' to see available slots."
                         return 1
@@ -44,7 +46,8 @@ preflight_check() {
             else
                 # For other commands, just need ANY authenticated slot
                 local has_slot=false
-                local parent_dir=$(get_parent_dir "$PROJECT_DIR" 2>/dev/null || echo "")
+                local parent_dir
+                parent_dir=$(get_parent_dir "$PROJECT_DIR" 2>/dev/null || echo "")
                 if [[ -n "$parent_dir" ]] && [[ -d "$parent_dir" ]]; then
                     for slot_dir in "$parent_dir"/*/ ; do
                         if [[ -d "$slot_dir" ]] && [[ -f "$slot_dir/.claude/.credentials.json" ]]; then
@@ -75,13 +78,16 @@ Please cd to a project directory first."
             local search="${1:-}"
             if [[ -n "$search" ]]; then
                 # Check if project exists
-                local search_lower=$(echo "$search" | tr '[:upper:]' '[:lower:]')
+                local search_lower
+                search_lower=$(echo "$search" | tr '[:upper:]' '[:lower:]')
                 local found=false
                 
                 for parent_dir in "$HOME/.claudebox/projects"/*/ ; do
                     [[ -d "$parent_dir" ]] || continue
-                    local dir_name=$(basename "$parent_dir")
-                    local dir_lower=$(echo "$dir_name" | tr '[:upper:]' '[:lower:]')
+                    local dir_name
+                    dir_name=$(basename "$parent_dir")
+                    local dir_lower
+                    dir_lower=$(echo "$dir_name" | tr '[:upper:]' '[:lower:]')
                     
                     if [[ "$dir_lower" == *"$search_lower"* ]]; then
                         found=true
@@ -110,7 +116,8 @@ Please cd to a project directory first."
             
             # Check for ANY authenticated slot
             local has_slot=false
-            local parent_dir=$(get_parent_dir "$PROJECT_DIR" 2>/dev/null || echo "")
+            local parent_dir
+            parent_dir=$(get_parent_dir "$PROJECT_DIR" 2>/dev/null || echo "")
             if [[ -n "$parent_dir" ]] && [[ -d "$parent_dir" ]]; then
                 for slot_dir in "$parent_dir"/*/ ; do
                     if [[ -d "$slot_dir" ]] && [[ -f "$slot_dir/.claude/.credentials.json" ]]; then
