@@ -9,6 +9,7 @@ if [[ ${1:-} == --child ]]; then
     PROJECT_DIR="$TEST_ROOT/project with spaces"
     PROJECT_PARENT_DIR="$TEST_ROOT/state"
     PROJECT_SLOT_DIR="$PROJECT_PARENT_DIR/slot"
+    export CLAUDEBOX_HOME="$TEST_ROOT/state"
     export DOCKER_USER=claude
     export IMAGE_NAME=claudebox-test
     export VERBOSE=false
@@ -24,10 +25,10 @@ if [[ ${1:-} == --child ]]; then
             case "$arg" in
                 *:/tmp/user-mcp-config.json:ro) user_file=${arg%:/tmp/user-mcp-config.json:ro} ;;
                 *:/tmp/project-mcp-config.json:ro) project_file=${arg%:/tmp/project-mcp-config.json:ro} ;;
-                "$PROJECT_SLOT_DIR/.local/share:/home/claude/.local/share") persistent=true ;;
+                "$PROJECT_PARENT_DIR/.local/share/uv/python:/home/claude/.local/share/uv/python") persistent=true ;;
             esac
         done
-        [[ $persistent == true && -d "$PROJECT_SLOT_DIR/.local/share" ]]
+        [[ $persistent == true && -d "$PROJECT_PARENT_DIR/.local/share/uv/python" ]]
         jq -e '.mcpServers.user.command == "user-command"' "$user_file" >/dev/null
         jq -e '.mcpServers.shared.command == "shared-command" and .mcpServers.override.command == "local-command"' "$project_file" >/dev/null
         printf '%s\n' "$user_file" "$project_file" >> "$TEST_ROOT/mounted-files"

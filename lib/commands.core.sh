@@ -123,6 +123,7 @@ _cmd_shell() {
         fillbar
         docker commit "$temp_container" "$IMAGE_NAME" >/dev/null
         docker rm -f "$temp_container" >/dev/null 2>&1
+        trap - EXIT
         fillbar stop
         success "Changes saved to image!"
     else

@@ -85,6 +85,7 @@ docker_exec_user() {
 #   args: Commands to pass to claude in container
 # Returns: Exit code from container
 # Note: Handles all mounting, environment setup, and security configuration
+# Keep runtime cleanup scoped to this call without replacing the caller's traps.
 run_claudebox_container() (
     local container_name="$1"
     local run_mode="$2"  # "interactive", "detached", "pipe", or "attached"
@@ -239,19 +240,42 @@ run_claudebox_container() (
     # Mount .cache directory
     docker_args+=(-v "$PROJECT_SLOT_DIR/.cache":/home/$DOCKER_USER/.cache)
     
-    # Mount .local/share for uv-managed Python installations
-    # uv downloads Python to ~/.local/share/uv/python/ which must persist across containers
-    mkdir -p "$PROJECT_SLOT_DIR/.local/share"
-    docker_args+=(-v "$PROJECT_SLOT_DIR/.local/share":/home/$DOCKER_USER/.local/share)
+    # The shared project venv must see the same managed Python in every slot.
+    # Mount only interpreters so image-provided uv tools remain visible.
+    mkdir -p "$PROJECT_PARENT_DIR/.local/share/uv/python"
+    docker_args+=(-v "$PROJECT_PARENT_DIR/.local/share/uv/python:/home/$DOCKER_USER/.local/share/uv/python")
     
-    # Mount SSH directory
-    docker_args+=(-v "$HOME/.ssh":"/home/$DOCKER_USER/.ssh:ro")
+    # SSH directory mounting
+    # Priority: $CLAUDEBOX_HOME/ssh (r/w) > ~/.ssh (r/o)
+    if [[ -d "$CLAUDEBOX_HOME/ssh" ]]; then
+        # Mount the dedicated directory even when it is still empty.
+        docker_args+=(-v "$CLAUDEBOX_HOME/ssh:/home/$DOCKER_USER/.ssh")
+        if [[ "$VERBOSE" == "true" ]]; then
+            echo "[DEBUG] Mounting ClaudeBox SSH directory (r/w): $CLAUDEBOX_HOME/ssh" >&2
+        fi
+    elif [[ -d "$HOME/.ssh" ]]; then
+        # Fall back to the host SSH directory read-only. Keys remain readable.
+        docker_args+=(-v "$HOME/.ssh:/home/$DOCKER_USER/.ssh:ro")
+        if [[ "$VERBOSE" == "true" ]]; then
+            echo "[DEBUG] Mounting default SSH directory (r/o): $HOME/.ssh" >&2
+        fi
+    fi
+    
+    # Mount git config if it exists
+    if [[ -f "$HOME/.gitconfig" ]]; then
+        docker_args+=(-v "$HOME/.gitconfig:/home/$DOCKER_USER/.gitconfig:ro")
+        if [[ "$VERBOSE" == "true" ]]; then
+            echo "[DEBUG] Mounting git config (r/o): $HOME/.gitconfig" >&2
+        fi
+    fi
     
     # Mount .env file if it exists in the project directory
     if [[ -f "$PROJECT_DIR/.env" ]]; then
         docker_args+=(-v "$PROJECT_DIR/.env":/workspace/.env:ro)
+        # Also pass the environment variables from the .env file
+        docker_args+=(--env-file "$PROJECT_DIR/.env")
         if [[ "$VERBOSE" == "true" ]]; then
-            echo "[DEBUG] Mounting .env file from project directory" >&2
+            echo "[DEBUG] Mounting and loading .env file from project directory" >&2
         fi
     fi
     
@@ -371,9 +395,11 @@ run_claudebox_container() (
         slot_index=$(get_slot_index "$slot_name" "$PROJECT_PARENT_DIR" 2>/dev/null || echo "1")
     fi
     
+    if [[ -n "${ANTHROPIC_API_KEY+x}" ]]; then
+        docker_args+=(-e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY")
+    fi
     docker_args+=(
         -e "NODE_ENV=${NODE_ENV:-production}"
-        -e "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}"
         -e "CLAUDEBOX_PROJECT_NAME=$project_name"
         -e "CLAUDEBOX_SLOT_NAME=$slot_name"
         -e "TERM=${TERM:-xterm-256color}"
