@@ -239,6 +239,11 @@ run_claudebox_container() {
     # Mount .cache directory
     docker_args+=(-v "$PROJECT_SLOT_DIR/.cache":/home/$DOCKER_USER/.cache)
     
+    # Mount .local/share for uv-managed Python installations
+    # uv downloads Python to ~/.local/share/uv/python/ which must persist across containers
+    mkdir -p "$PROJECT_SLOT_DIR/.local/share"
+    docker_args+=(-v "$PROJECT_SLOT_DIR/.local/share":/home/$DOCKER_USER/.local/share)
+    
     # Mount SSH directory
     docker_args+=(-v "$HOME/.ssh":"/home/$DOCKER_USER/.ssh:ro")
     
