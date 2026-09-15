@@ -7,6 +7,7 @@ import hmac
 import http.server
 import json
 import os
+import socketserver
 import subprocess
 import sys
 import tempfile
@@ -23,6 +24,12 @@ DEFAULT_MAX_WORKERS = 4
 class ClipboardHTTPServer(http.server.ThreadingHTTPServer):
     daemon_threads = True
     request_queue_size = 8
+
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name = str(host)
+        self.server_port = port
 
     def process_request(self, request, client_address):
         if not self.worker_semaphore.acquire(blocking=False):

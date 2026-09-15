@@ -33,6 +33,7 @@ clipboard_bridge_start() {
     done
     if [[ ! -s "$clipboard_dir/ready.json" ]]; then
         printf 'ERROR: macOS clipboard bridge startup timed out.\n' >&2
+        cat "$clipboard_dir/server.log" >&2
         return 1
     fi
     CLAUDEBOX_CLIPBOARD_PORT=$(python3 -c 'import json,sys; p=json.load(open(sys.argv[1]))["port"]; assert isinstance(p,int) and 0<p<65536; print(p)' "$clipboard_dir/ready.json") || return 1

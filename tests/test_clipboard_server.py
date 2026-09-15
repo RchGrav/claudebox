@@ -151,6 +151,31 @@ class RunningServer:
 
 
 class ClipboardServerTest(unittest.TestCase):
+    def test_create_server_does_not_reverse_lookup_bound_host(self):
+        module = load_server_module()
+        import socket
+
+        original_getfqdn = socket.getfqdn
+        httpd = None
+
+        def forbidden_getfqdn(_host):
+            raise AssertionError("server startup must not depend on reverse DNS")
+
+        socket.getfqdn = forbidden_getfqdn
+        try:
+            httpd = module.create_server(
+                "127.0.0.1",
+                0,
+                "secret-token",
+                FixtureProvider(None),
+            )
+            self.assertEqual(httpd.server_name, "127.0.0.1")
+            self.assertEqual(httpd.server_port, httpd.server_address[1])
+        finally:
+            socket.getfqdn = original_getfqdn
+            if httpd is not None:
+                httpd.server_close()
+
     def test_bad_token_does_not_read_clipboard_provider(self):
         module = load_server_module()
         provider = FixtureProvider(PNG_BYTES)
