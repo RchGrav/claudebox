@@ -109,7 +109,7 @@ main() {
                 if [[ ${#saved_flags[@]} -gt 0 ]]; then
                     # Re-parse WITH saved flags, but the command structure is preserved
                     # because the command was already identified from original args
-                    parse_cli_args "${original_args[@]}" "${saved_flags[@]}"
+                    parse_cli_args ${original_args[@]+"${original_args[@]}"} "${saved_flags[@]}"
                     process_host_flags
                     
                     if [[ "$VERBOSE" == "true" ]]; then
@@ -459,7 +459,7 @@ main() {
                 # Re-parse all arguments with saved flags included
                 if [[ ${#saved_flags[@]} -gt 0 ]]; then
                     # Combine original args with saved flags
-                    local all_args=("${original_args[@]}" "${saved_flags[@]}")
+                    local all_args=(${original_args[@]+"${original_args[@]}"} "${saved_flags[@]}")
                     
                     # Re-parse to properly sort flags
                     parse_cli_args "${all_args[@]}"
@@ -596,20 +596,17 @@ LABEL claudebox.profiles=\"$profile_hash\"
 LABEL claudebox.profiles.crc=\"$profiles_file_hash\"
 LABEL claudebox.project=\"$project_folder_name\""
     
-    # Replace placeholders using temp files (Bash 3.2 compatible)
-    # awk -v doesn't handle multiline strings well in Bash 3.2
-    local temp_pi temp_lbs
-    temp_pi=$(mktemp) || error "Failed to create temp file"
-    temp_lbs=$(mktemp) || error "Failed to create temp file"
-    
-    # Trap to ensure temp files are cleaned up on any exit
-    trap 'rm -f "$temp_pi" "$temp_lbs"' EXIT INT TERM
-    
-    printf '%s' "$profile_installations" > "$temp_pi"
-    printf '%s' "$labels" > "$temp_lbs"
-    
+    # Read multiline replacements from files for BSD awk. Confine temporary
+    # files and the cleanup trap to a subshell so caller traps stay intact.
     local final_dockerfile
-    final_dockerfile=$(awk -v pi_file="$temp_pi" -v lbs_file="$temp_lbs" '
+    final_dockerfile=$(
+        temp_pi=$(mktemp) || exit 1
+        temp_lbs=""
+        trap 'rm -f -- "$temp_pi" ${temp_lbs:+"$temp_lbs"}' EXIT
+        temp_lbs=$(mktemp) || exit 1
+        printf '%s' "$profile_installations" > "$temp_pi"
+        printf '%s' "$labels" > "$temp_lbs"
+        awk -v pi_file="$temp_pi" -v lbs_file="$temp_lbs" '
     # If the whole line is {{ PROFILE_INSTALLATIONS }}, print file content and skip
     /^[[:space:]]*\{\{[[:space:]]*PROFILE_INSTALLATIONS[[:space:]]*\}\}[[:space:]]*$/ {
         while ((getline line < pi_file) > 0) print line
@@ -624,11 +621,8 @@ LABEL claudebox.project=\"$project_folder_name\""
     }
     # Otherwise, print the line unchanged
     { print }
-    ' <<<"$base_dockerfile") || error "Failed to apply Dockerfile substitutions"
-    
-    # Clear trap and cleanup temp files
-    trap - EXIT INT TERM
-    rm -f "$temp_pi" "$temp_lbs"
+    ' <<<"$base_dockerfile"
+    ) || error "Failed to apply Dockerfile substitutions"
 
     # Guard: ensure no unreplaced placeholders remain
     if grep -q '{{PROFILE_INSTALLATIONS}}' <<<"$final_dockerfile" || grep -q '{{LABELS}}' <<<"$final_dockerfile"; then

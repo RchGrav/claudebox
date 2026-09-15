@@ -46,7 +46,7 @@ run_case() {
     TESTS_RUN=$((TESTS_RUN + 1))
     printf 'Test %d: %s... ' "$TESTS_RUN" "$name"
 
-    output="$(bash "$MAIN" "$@" 2>&1 </dev/null)"
+    output="$("$BASH" "$MAIN" "$@" 2>&1 </dev/null)"
     status=$?
 
     if printf '%s' "$output" | grep -q 'unbound variable'; then
@@ -98,9 +98,13 @@ check_profile_file() {
 
 # First run only updates the symlink and prints PATH advice; do it once so
 # the cases below reach the CLI parser.
-bash "$MAIN" help >/dev/null 2>&1 </dev/null || true
+"$BASH" "$MAIN" help >/dev/null 2>&1 </dev/null || true
 
 run_case "no arguments"        no
+mkdir -p "$HOME/.claudebox"
+printf '%s\n' '--verbose' > "$HOME/.claudebox/default-flags"
+run_case "no arguments with saved flags" no
+rm "$HOME/.claudebox/default-flags"
 run_case "help"                yes help
 run_case "profiles"            yes profiles
 run_case "--verbose profiles"  yes --verbose profiles

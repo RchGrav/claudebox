@@ -14,45 +14,52 @@ jobs:
         os: [ubuntu-latest, macos-latest]
         
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     
-    - name: Run Bash 3.2 compatibility tests
+    - name: Run portable shell tests
       run: |
-        cd tests
-        bash test_bash32_compat.sh
+        for test_script in tests/test_*.sh; do
+          case "$test_script" in
+            tests/test_in_bash32_docker.sh|tests/test_container_integration.sh)
+              continue
+              ;;
+          esac
+          /bin/bash "$test_script"
+        done
         
-    - name: Run Docker Bash 3.2 tests (Linux only)
+    - name: Run Docker shell tests (Linux only)
       if: runner.os == 'Linux'
       run: |
-        cd tests
-        bash test_in_bash32_docker.sh
+        /bin/bash tests/test_in_bash32_docker.sh
+        if [ -f tests/test_docker_runtime.sh ]; then
+          /bin/bash tests/test_docker_runtime.sh
+        fi
         
   lint:
     runs-on: ubuntu-latest
     
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     
     - name: Install ShellCheck
       run: |
         sudo apt-get update
         sudo apt-get install -y shellcheck
         
-    - name: Run ShellCheck on main script
-      run: shellcheck -x main.sh
-      
-    - name: Run ShellCheck on library files
-      run: shellcheck -x lib/*.sh
-      
-    - name: Run ShellCheck on command modules
-      run: shellcheck -x lib/commands/*.sh
+    - name: Run ShellCheck with baseline
+      run: |
+        bash tooling/ci/shellcheck-baseline.sh \
+          main.sh \
+          lib/*.sh \
+          .builder/*.sh \
+          tests/test_*.sh
       
   build:
     runs-on: ubuntu-latest
     needs: [test-compatibility, lint]
     
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     
     - name: Build installer
       run: |
@@ -60,16 +67,34 @@ jobs:
         
     - name: Verify installer was created
       run: |
-        test -f claudebox
-        echo "Installer size: $(ls -lh claudebox | awk '{print $5}')"
+        test -f dist/claudebox.run
+        test -n "$(find dist -maxdepth 1 -name 'claudebox-*.tar.gz' -print -quit)"
+        test -L claudebox.run
+        echo "Installer size: $(ls -lh dist/claudebox.run | awk '{print $5}')"
         
-    - name: Test installer in dev mode
+    - name: Test installer in temporary directory
       run: |
-        # Should detect we're in a git repo and run directly
-        ./claudebox --help | grep "ClaudeBox"
+        TEST_HOME=$(mktemp -d)
+        trap 'rm -rf "$TEST_HOME"' EXIT
+        export HOME="$TEST_HOME"
+        /bin/bash ./dist/claudebox.run profiles
+        test -f "$HOME/.claudebox/source/main.sh"
+        test -L "$HOME/.local/bin/claudebox"
+        "$HOME/.local/bin/claudebox" profiles
+        /bin/bash "$HOME/.claudebox/source/tests/test_bash32_compat.sh"
+        /bin/bash "$HOME/.claudebox/source/tests/test_cli_bash32.sh"
+        /bin/bash "$HOME/.claudebox/source/tests/test_command_sync.sh"
+        /bin/bash "$HOME/.claudebox/source/tests/test_docker_runtime.sh"
+        /bin/bash "$HOME/.claudebox/source/tests/test_dockerfile_generation.sh"
+        /bin/bash "$HOME/.claudebox/source/tests/test_runtime_regressions.sh"
+        /bin/bash "$HOME/.claudebox/source/tests/test_profile_download_failure.sh"
+        /bin/bash "$HOME/.claudebox/source/tests/test_dockerfile_template.sh"
         
     - name: Upload installer artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: claudebox-installer
-        path: claudebox
+        path: |
+          dist/claudebox.run
+          dist/claudebox-*.tar.gz
+        if-no-files-found: error

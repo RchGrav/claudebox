@@ -24,9 +24,14 @@ error() { printf '%s\n' "$*" >&2; exit 1; }
 printf '[profiles]\ncore\ndevops\njava\nshell\n' > "$PROJECT_PARENT_DIR/profiles.ini"
 (build_docker_image)
 grep -Fq 'RUN apt-get update && apt-get install -y gcc' "$SANDBOX/generated"
+# Profile shell expressions must remain literal until Docker executes them.
+# shellcheck disable=SC2016
 grep -Fq 'source $HOME/.sdkman/bin/sdkman-init.sh && sdk install java' "$SANDBOX/generated"
+# shellcheck disable=SC2016,SC1003
 grep -Fq 'ARCH=$(dpkg --print-architecture) && \' "$SANDBOX/generated"
-! grep -Eq '\{\{[[:space:]]*(PROFILE_INSTALLATIONS|LABELS)[[:space:]]*\}\}' "$SANDBOX/generated"
+if grep -Eq '\{\{[[:space:]]*(PROFILE_INSTALLATIONS|LABELS)[[:space:]]*\}\}' "$SANDBOX/generated"; then
+    error 'Unreplaced placeholders in generated profiles'
+fi
 printf 'PASS: multiline profiles preserve ampersands, dollar signs and backslashes\n'
 grep -Fxq 'LABEL claudebox.project="test-project"' "$SANDBOX/generated"
 printf 'PASS: generated labels are inserted literally\n'
@@ -34,11 +39,15 @@ printf 'PASS: generated labels are inserted literally\n'
 printf 'FROM claudebox-core\n  {{ PROFILE_INSTALLATIONS }}  \n  {{ LABELS }}  \n' > "$SCRIPT_DIR/build/Dockerfile.project"
 (build_docker_image)
 grep -Fq 'sdk install java' "$SANDBOX/generated"
-! grep -Fq '{{' "$SANDBOX/generated"
+if grep -Fq '{{' "$SANDBOX/generated"; then
+    error 'Whitespace placeholders were not replaced'
+fi
 printf 'PASS: whitespace around placeholders is supported\n'
 
 printf '[profiles]\n' > "$PROJECT_PARENT_DIR/profiles.ini"
 (build_docker_image)
-! grep -Eq '^RUN |\{\{' "$SANDBOX/generated"
+if grep -Eq '^RUN |\{\{' "$SANDBOX/generated"; then
+    error 'Empty profiles generated an installation or unreplaced placeholder'
+fi
 grep -Fxq 'LABEL claudebox.project="test-project"' "$SANDBOX/generated"
 printf 'PASS: empty profiles render without an empty-array error\n'

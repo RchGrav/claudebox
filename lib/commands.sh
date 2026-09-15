@@ -256,7 +256,7 @@ _forward_to_container() {
 dispatch_command() {
     local cmd="${1:-}"; shift || true
     if [[ "$VERBOSE" == "true" ]]; then
-        echo "[DEBUG] dispatch_command called with: cmd='$cmd' remaining args='$@'" >&2
+        echo "[DEBUG] dispatch_command called with: cmd='$cmd' remaining args='$*'" >&2
     fi
     
     case "${cmd}" in

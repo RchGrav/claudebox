@@ -95,7 +95,7 @@ run_claudebox_container() (
     # Handle "attached" mode - start detached, wait, then attach
     if [[ "$run_mode" == "attached" ]]; then
         # Start detached
-        run_claudebox_container "$container_name" "detached" "${container_args[@]}" >/dev/null
+        run_claudebox_container "$container_name" "detached" ${container_args[@]+"${container_args[@]}"} >/dev/null
         
         # Show progress while container initializes
         fillbar
@@ -290,24 +290,30 @@ run_claudebox_container() (
         exit 1
     fi
     
+    # Keep temporary configuration and its EXIT trap inside this invocation's
+    # subshell. The caller's traps survive, and local paths remain in scope on exit.
+    local mcp_temp_dir
+    mcp_temp_dir=$(mktemp -d "${TMPDIR:-/tmp}/claudebox-mcp.XXXXXX") || return 1
+    trap 'rm -rf -- "$mcp_temp_dir"' EXIT
+
     # Helper function to create and merge MCP config files
     create_mcp_config_file() {
         local config_file="$1"
         local temp_file="$2"
         
         # Create temporary file with unique name
-        local mcp_file=$(mktemp /tmp/claudebox-mcp-$(date +%s)-$$.json 2>/dev/null || mktemp)
-        mcp_temp_files+=("$mcp_file")
+        local mcp_file
+        mcp_file=$(mktemp "$mcp_temp_dir/config.XXXXXX") || return 1
         
         # Extract mcpServers if they exist
         if [[ -f "$config_file" ]] && jq -e '.mcpServers' "$config_file" >/dev/null 2>&1; then
             if [[ -f "$temp_file" ]]; then
                 # Merge with existing temp file
                 jq -s '.[0].mcpServers * .[1].mcpServers | {mcpServers: .}' \
-                    "$temp_file" "$config_file" > "$mcp_file" 2>/dev/null
+                    "$temp_file" "$config_file" > "$mcp_file" || return 1
             else
                 # Create new config file
-                jq '{mcpServers: .mcpServers}' "$config_file" > "$mcp_file" 2>/dev/null
+                jq '{mcpServers: .mcpServers}' "$config_file" > "$mcp_file" || return 1
             fi
             printf "%s" "$mcp_file"
         else
@@ -319,32 +325,9 @@ run_claudebox_container() (
     local user_mcp_file=""
     local project_mcp_file=""
     
-    # Track all temporary MCP files for cleanup
-    declare -a mcp_temp_files=()
-    
-    # Set up cleanup trap for temporary MCP config files
-    cleanup_mcp_files() {
-        local file
-        # Check if array exists and has elements (set -u safe)
-        if [[ -n "${mcp_temp_files+set}" ]] && [ ${#mcp_temp_files[@]} -gt 0 ]; then
-            for file in "${mcp_temp_files[@]}"; do
-                if [[ -f "$file" ]]; then
-                    rm -f "$file"
-                fi
-            done
-        fi
-        if [[ -n "${user_mcp_file:-}" ]] && [[ -f "$user_mcp_file" ]]; then
-            rm -f "$user_mcp_file"
-        fi
-        if [[ -n "${project_mcp_file:-}" ]] && [[ -f "$project_mcp_file" ]]; then
-            rm -f "$project_mcp_file"
-        fi
-    }
-    trap cleanup_mcp_files EXIT
-    
     # Create user MCP config file from ~/.claude.json
     if [[ -f "$HOME/.claude.json" ]]; then
-        user_mcp_file=$(create_mcp_config_file "$HOME/.claude.json" "")
+        user_mcp_file=$(create_mcp_config_file "$HOME/.claude.json" "") || return 1
         
         if [[ -n "$user_mcp_file" ]]; then
             local user_count=$(jq '.mcpServers | length' "$user_mcp_file" 2>/dev/null || echo "0")
@@ -365,14 +348,13 @@ run_claudebox_container() (
     
     # Create project MCP config file by merging project configs
     # Start with empty config file for merging
-    local temp_project_file=$(mktemp /tmp/claudebox-project-temp-$(date +%s)-$$.json 2>/dev/null || mktemp)
-    mcp_temp_files+=("$temp_project_file")
+    local temp_project_file="$mcp_temp_dir/project.json"
     echo '{"mcpServers":{}}' > "$temp_project_file"
     
     # Merge shared project settings first
     local merged_file=""
     if [[ -f "$PROJECT_DIR/.claude/settings.json" ]]; then
-        merged_file=$(create_mcp_config_file "$PROJECT_DIR/.claude/settings.json" "$temp_project_file")
+        merged_file=$(create_mcp_config_file "$PROJECT_DIR/.claude/settings.json" "$temp_project_file") || return 1
         if [[ -n "$merged_file" ]]; then
             mv "$merged_file" "$temp_project_file"
         fi
@@ -380,7 +362,7 @@ run_claudebox_container() (
     
     # Merge local project settings (highest priority)
     if [[ -f "$PROJECT_DIR/.claude/settings.local.json" ]]; then
-        merged_file=$(create_mcp_config_file "$PROJECT_DIR/.claude/settings.local.json" "$temp_project_file")
+        merged_file=$(create_mcp_config_file "$PROJECT_DIR/.claude/settings.local.json" "$temp_project_file") || return 1
         if [[ -n "$merged_file" ]]; then
             mv "$merged_file" "$temp_project_file"
         fi
