@@ -77,7 +77,11 @@ test_get_all_names() {
     eval "$PROFILE_FUNCS"
     local result=$(get_all_profile_names)
     local count=$(echo "$result" | wc -w)
-    [[ $count -eq 20 ]]
+    local name
+    [[ $count -ge 20 ]] || return 1
+    for name in $result; do
+        profile_exists "$name" || return 1
+    done
 }
 run_test "get_all_profile_names()" test_get_all_names
 

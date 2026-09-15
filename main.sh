@@ -6,7 +6,7 @@
 # ==============================================================================
 
 # Version
-readonly CLAUDEBOX_VERSION="2.0.0"
+readonly CLAUDEBOX_VERSION="2.0.1"
 
 set -euo pipefail
 
@@ -137,7 +137,7 @@ main() {
     # If command doesn't need Docker, skip all Docker setup
     if [[ "$cmd_requirements" == "none" ]]; then
         # Dispatch the command directly and exit
-        dispatch_command "${CLI_SCRIPT_COMMAND}" "${CLI_PASS_THROUGH[@]}" "${CLI_CONTROL_FLAGS[@]}"
+        dispatch_command "${CLI_SCRIPT_COMMAND}" "${CLI_PASS_THROUGH[@]+"${CLI_PASS_THROUGH[@]}"}" "${CLI_CONTROL_FLAGS[@]+"${CLI_CONTROL_FLAGS[@]}"}"
         exit $?
     fi
     
@@ -299,7 +299,7 @@ main() {
         local cmd_req=$(get_command_requirements "${CLI_SCRIPT_COMMAND}")
         # Only run pre-flight for commands that need Docker or image
         if [[ "$cmd_req" == "docker" ]] || [[ "$cmd_req" == "image" ]]; then
-            if ! preflight_check "${CLI_SCRIPT_COMMAND}" "${CLI_PASS_THROUGH[@]}"; then
+            if ! preflight_check "${CLI_SCRIPT_COMMAND}" "${CLI_PASS_THROUGH[@]+"${CLI_PASS_THROUGH[@]}"}"; then
                 # Pre-flight check failed and printed error
                 exit 1
             fi
@@ -353,18 +353,21 @@ main() {
                 local docker_profiles=()
                 local python_only_profiles=("python" "ml" "datascience")
                 
-                for profile in "${current_profiles[@]}"; do
-                    local is_python_only=false
-                    for py_profile in "${python_only_profiles[@]}"; do
-                        if [[ "$profile" == "$py_profile" ]]; then
-                            is_python_only=true
-                            break
+                # Guard against empty array with set -u
+                if [ ${#current_profiles[@]} -gt 0 ]; then
+                    for profile in "${current_profiles[@]}"; do
+                        local is_python_only=false
+                        for py_profile in "${python_only_profiles[@]}"; do
+                            if [[ "$profile" == "$py_profile" ]]; then
+                                is_python_only=true
+                                break
+                            fi
+                        done
+                        if [[ "$is_python_only" == "false" ]]; then
+                            docker_profiles+=("$profile")
                         fi
                     done
-                    if [[ "$is_python_only" == "false" ]]; then
-                        docker_profiles+=("$profile")
-                    fi
-                done
+                fi
                 
                 # Calculate hash only for Docker-affecting profiles
                 local docker_profiles_hash=""
@@ -426,7 +429,7 @@ main() {
     if [[ -n "${CLI_SCRIPT_COMMAND}" ]]; then
         # Script command - dispatch on host
         # Pass control flags and pass-through args to dispatch_command
-        dispatch_command "${CLI_SCRIPT_COMMAND}" "${CLI_PASS_THROUGH[@]}" "${CLI_CONTROL_FLAGS[@]}"
+        dispatch_command "${CLI_SCRIPT_COMMAND}" "${CLI_PASS_THROUGH[@]+"${CLI_PASS_THROUGH[@]}"}" "${CLI_CONTROL_FLAGS[@]+"${CLI_CONTROL_FLAGS[@]}"}"
         exit $?
     else
         # No script command - running Claude interactively
@@ -472,12 +475,14 @@ main() {
             # Check if stdin is not a terminal (i.e., we're receiving piped input)
             # and -p/--print flag isn't already present
             local has_print_flag=false
-            for arg in "${CLI_PASS_THROUGH[@]}"; do
-                if [[ "$arg" == "-p" ]] || [[ "$arg" == "--print" ]]; then
-                    has_print_flag=true
-                    break
-                fi
-            done
+            if [ ${#CLI_PASS_THROUGH[@]} -gt 0 ]; then
+                for arg in "${CLI_PASS_THROUGH[@]}"; do
+                    if [[ "$arg" == "-p" ]] || [[ "$arg" == "--print" ]]; then
+                        has_print_flag=true
+                        break
+                    fi
+                done
+            fi
             
             if [[ "$VERBOSE" == "true" ]]; then
                 if [[ -t 0 ]]; then
@@ -495,9 +500,9 @@ main() {
                 fi
                 local piped_input
                 piped_input=$(cat)
-                run_claudebox_container "$container_name" "interactive" "${CLI_CONTROL_FLAGS[@]}" "-p" "$piped_input" "${CLI_PASS_THROUGH[@]}"
+                run_claudebox_container "$container_name" "interactive" "${CLI_CONTROL_FLAGS[@]+"${CLI_CONTROL_FLAGS[@]}"}" "-p" "$piped_input" "${CLI_PASS_THROUGH[@]+"${CLI_PASS_THROUGH[@]}"}"
             else
-                run_claudebox_container "$container_name" "interactive" "${CLI_CONTROL_FLAGS[@]}" "${CLI_PASS_THROUGH[@]}"
+                run_claudebox_container "$container_name" "interactive" "${CLI_CONTROL_FLAGS[@]+"${CLI_CONTROL_FLAGS[@]}"}" "${CLI_PASS_THROUGH[@]+"${CLI_PASS_THROUGH[@]}"}"
             fi
         else
             show_no_slots_menu
@@ -537,33 +542,39 @@ build_docker_image() {
         done < <(read_profile_section "$profiles_file" "profiles")
         
         # Generate profile installations
-        for profile in "${current_profiles[@]}"; do
-            profile=$(echo "$profile" | tr -d '[:space:]')
-            [[ -z "$profile" ]] && continue
-            
-            # Convert hyphens to underscores for function names
-            local profile_fn="get_profile_${profile//-/_}"
-            if type -t "$profile_fn" >/dev/null; then
-                profile_installations+=$'\n'"$($profile_fn)"
-            fi
-        done
+        # Guard against empty array with set -u
+        if [ ${#current_profiles[@]} -gt 0 ]; then
+            for profile in "${current_profiles[@]}"; do
+                profile=$(echo "$profile" | tr -d '[:space:]')
+                [[ -z "$profile" ]] && continue
+                
+                # Convert hyphens to underscores for function names
+                local profile_fn="get_profile_${profile//-/_}"
+                if type -t "$profile_fn" >/dev/null; then
+                    profile_installations+=$'\n'"$($profile_fn)"
+                fi
+            done
+        fi
         
         # Calculate hash only for Docker-affecting profiles
         local docker_profiles=()
         local python_only_profiles=("python" "ml" "datascience")
         
-        for profile in "${current_profiles[@]}"; do
-            local is_python_only=false
-            for py_profile in "${python_only_profiles[@]}"; do
-                if [[ "$profile" == "$py_profile" ]]; then
-                    is_python_only=true
-                    break
+        # Guard against empty array with set -u
+        if [ ${#current_profiles[@]} -gt 0 ]; then
+            for profile in "${current_profiles[@]}"; do
+                local is_python_only=false
+                for py_profile in "${python_only_profiles[@]}"; do
+                    if [[ "$profile" == "$py_profile" ]]; then
+                        is_python_only=true
+                        break
+                    fi
+                done
+                if [[ "$is_python_only" == "false" ]]; then
+                    docker_profiles+=("$profile")
                 fi
             done
-            if [[ "$is_python_only" == "false" ]]; then
-                docker_profiles+=("$profile")
-            fi
-        done
+        fi
         
         if [[ ${#docker_profiles[@]} -gt 0 ]]; then
             profile_hash=$(printf '%s\n' "${docker_profiles[@]}" | sort | cksum | cut -d' ' -f1)
@@ -585,23 +596,43 @@ LABEL claudebox.profiles=\"$profile_hash\"
 LABEL claudebox.profiles.crc=\"$profiles_file_hash\"
 LABEL claudebox.project=\"$project_folder_name\""
     
-    # Replace placeholders in the project template
-    local final_dockerfile="$base_dockerfile"
+    # Replace placeholders using temp files (Bash 3.2 compatible)
+    # awk -v doesn't handle multiline strings well in Bash 3.2
+    local temp_pi temp_lbs
+    temp_pi=$(mktemp) || error "Failed to create temp file"
+    temp_lbs=$(mktemp) || error "Failed to create temp file"
     
-    # Replace WHOLE lines that contain the placeholders (with optional spaces)
+    # Trap to ensure temp files are cleaned up on any exit
+    trap 'rm -f "$temp_pi" "$temp_lbs"' EXIT INT TERM
+    
+    printf '%s' "$profile_installations" > "$temp_pi"
+    printf '%s' "$labels" > "$temp_lbs"
+    
     local final_dockerfile
-    final_dockerfile=$(awk -v pi="$profile_installations" -v lbs="$labels" '
-    # If the whole line is {{ PROFILE_INSTALLATIONS }}, print injected block and skip
-    /^[[:space:]]*\{\{[[:space:]]*PROFILE_INSTALLATIONS[[:space:]]*\}\}[[:space:]]*$/ { print pi; next }
-    # If the whole line is {{ LABELS }}, print labels block and skip
-    /^[[:space:]]*\{\{[[:space:]]*LABELS[[:space:]]*\}\}[[:space:]]*$/ { print lbs; next }
+    final_dockerfile=$(awk -v pi_file="$temp_pi" -v lbs_file="$temp_lbs" '
+    # If the whole line is {{ PROFILE_INSTALLATIONS }}, print file content and skip
+    /^[[:space:]]*\{\{[[:space:]]*PROFILE_INSTALLATIONS[[:space:]]*\}\}[[:space:]]*$/ {
+        while ((getline line < pi_file) > 0) print line
+        close(pi_file)
+        next
+    }
+    # If the whole line is {{ LABELS }}, print file content and skip
+    /^[[:space:]]*\{\{[[:space:]]*LABELS[[:space:]]*\}\}[[:space:]]*$/ {
+        while ((getline line < lbs_file) > 0) print line
+        close(lbs_file)
+        next
+    }
     # Otherwise, print the line unchanged
     { print }
     ' <<<"$base_dockerfile") || error "Failed to apply Dockerfile substitutions"
+    
+    # Clear trap and cleanup temp files
+    trap - EXIT INT TERM
+    rm -f "$temp_pi" "$temp_lbs"
 
     # Guard: ensure no unreplaced placeholders remain
-    if grep -q '{{PROFILE_INSTALLATIONS}}' <<<"$final_dockerfile" grep -q '{{LABELS}}' <<<"$final_dockerfile"; then
-    error "Unreplaced placeholders remain in generated Dockerfile"
+    if grep -q '{{PROFILE_INSTALLATIONS}}' <<<"$final_dockerfile" || grep -q '{{LABELS}}' <<<"$final_dockerfile"; then
+        error "Unreplaced placeholders remain in generated Dockerfile"
     fi
 
     printf '%s' "$final_dockerfile" > "$dockerfile"

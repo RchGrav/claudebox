@@ -57,7 +57,7 @@ The Ultimate Claude Code Docker Development Environment - Run Claude AI's coding
 
 ## 🛠️ Installation
 
-ClaudeBox v2.0.0 offers two installation methods:
+ClaudeBox v2.0.1 offers two installation methods:
 
 ### Method 1: Self-Extracting Installer (Recommended)
 
@@ -81,11 +81,11 @@ For manual installation or custom locations, use the archive:
 
 ```bash
 # Download the archive
-wget https://github.com/RchGrav/claudebox/releases/latest/download/claudebox-2.0.0.tar.gz
+wget https://github.com/RchGrav/claudebox/releases/latest/download/claudebox-2.0.1.tar.gz
 
 # Extract to your preferred location
 mkdir -p ~/my-tools/claudebox
-tar -xzf claudebox-2.0.0.tar.gz -C ~/my-tools/claudebox
+tar -xzf claudebox-2.0.1.tar.gz -C ~/my-tools/claudebox
 
 # Run main.sh to create symlink
 cd ~/my-tools/claudebox

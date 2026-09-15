@@ -85,7 +85,8 @@ docker_exec_user() {
 #   args: Commands to pass to claude in container
 # Returns: Exit code from container
 # Note: Handles all mounting, environment setup, and security configuration
-run_claudebox_container() {
+# Keep runtime cleanup scoped to this call without replacing the caller's traps.
+run_claudebox_container() (
     local container_name="$1"
     local run_mode="$2"  # "interactive", "detached", "pipe", or "attached"
     shift 2
@@ -239,6 +240,11 @@ run_claudebox_container() {
     # Mount .cache directory
     docker_args+=(-v "$PROJECT_SLOT_DIR/.cache":/home/$DOCKER_USER/.cache)
     
+    # The shared project venv must see the same managed Python in every slot.
+    # Mount only interpreters so image-provided uv tools remain visible.
+    mkdir -p "$PROJECT_PARENT_DIR/.local/share/uv/python"
+    docker_args+=(-v "$PROJECT_PARENT_DIR/.local/share/uv/python:/home/$DOCKER_USER/.local/share/uv/python")
+    
     # Mount SSH directory
     docker_args+=(-v "$HOME/.ssh":"/home/$DOCKER_USER/.ssh:ro")
     
@@ -296,15 +302,18 @@ run_claudebox_container() {
     # Set up cleanup trap for temporary MCP config files
     cleanup_mcp_files() {
         local file
-        for file in "${mcp_temp_files[@]}"; do
-            if [[ -f "$file" ]]; then
-                rm -f "$file"
-            fi
-        done
-        if [[ -n "$user_mcp_file" ]] && [[ -f "$user_mcp_file" ]]; then
+        # Check if array exists and has elements (set -u safe)
+        if [[ -n "${mcp_temp_files+set}" ]] && [ ${#mcp_temp_files[@]} -gt 0 ]; then
+            for file in "${mcp_temp_files[@]}"; do
+                if [[ -f "$file" ]]; then
+                    rm -f "$file"
+                fi
+            done
+        fi
+        if [[ -n "${user_mcp_file:-}" ]] && [[ -f "$user_mcp_file" ]]; then
             rm -f "$user_mcp_file"
         fi
-        if [[ -n "$project_mcp_file" ]] && [[ -f "$project_mcp_file" ]]; then
+        if [[ -n "${project_mcp_file:-}" ]] && [[ -f "$project_mcp_file" ]]; then
             rm -f "$project_mcp_file"
         fi
     }
@@ -409,7 +418,7 @@ run_claudebox_container() {
     local exit_code=$?
     
     return $exit_code
-}
+)
 
 check_container_exists() {
     local container_name="$1"

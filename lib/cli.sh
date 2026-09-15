@@ -20,8 +20,6 @@ readonly SCRIPT_COMMANDS=(shell create slot slots revoke profiles projects profi
 #   pass_through: Array of args to pass to Claude in container
 # Note: Each argument goes into exactly ONE bucket - no duplication
 parse_cli_args() {
-    local all_args=("$@")
-    
     # Initialize bucket arrays
     host_flags=()
     control_flags=()
@@ -31,7 +29,8 @@ parse_cli_args() {
     # Single parsing loop - each arg goes into exactly ONE bucket
     local found_script_command=false
     
-    for arg in "${all_args[@]}"; do
+    # Iterate directly over arguments (handles empty $@ with set -u)
+    for arg in "$@"; do
         if [[ " ${HOST_ONLY_FLAGS[*]} " == *" $arg "* ]]; then
             # Bucket 1: Host-only flags
             host_flags+=("$arg")
@@ -48,28 +47,34 @@ parse_cli_args() {
         fi
     done
     
-    # Export results for use by main script
-    export CLI_HOST_FLAGS=("${host_flags[@]}")
-    export CLI_CONTROL_FLAGS=("${control_flags[@]}")
+    # Export results for use by main script (handle empty arrays with set -u)
+    CLI_HOST_FLAGS=("${host_flags[@]+"${host_flags[@]}"}")
+    export CLI_HOST_FLAGS
+    CLI_CONTROL_FLAGS=("${control_flags[@]+"${control_flags[@]}"}")
+    export CLI_CONTROL_FLAGS
     export CLI_SCRIPT_COMMAND="$script_command"
-    export CLI_PASS_THROUGH=("${pass_through[@]}")
+    CLI_PASS_THROUGH=("${pass_through[@]+"${pass_through[@]}"}")
+    export CLI_PASS_THROUGH
 }
 
 # Process host-only flags and set environment variables
 process_host_flags() {
-    for flag in "${CLI_HOST_FLAGS[@]}"; do
-        case "$flag" in
-            --verbose)
-                export VERBOSE=true
-                ;;
-            rebuild)
-                export REBUILD=true
-                ;;
-            tmux)
-                export CLAUDEBOX_WRAP_TMUX=true
-                ;;
-        esac
-    done
+    # Handle empty array with set -u compatibility
+    if [ ${#CLI_HOST_FLAGS[@]} -gt 0 ]; then
+        for flag in "${CLI_HOST_FLAGS[@]}"; do
+            case "$flag" in
+                --verbose)
+                    export VERBOSE=true
+                    ;;
+                rebuild)
+                    export REBUILD=true
+                    ;;
+                tmux)
+                    export CLAUDEBOX_WRAP_TMUX=true
+                    ;;
+            esac
+        done
+    fi
 }
 
 # Get command requirements - returns one of:
@@ -126,10 +131,10 @@ requires_slot() {
 debug_parsed_args() {
     if [[ "${VERBOSE:-false}" == "true" ]]; then
         echo "[DEBUG] CLI Parser Results:" >&2
-        echo "[DEBUG]   Host flags: ${CLI_HOST_FLAGS[*]}" >&2
-        echo "[DEBUG]   Control flags: ${CLI_CONTROL_FLAGS[*]}" >&2
+        echo "[DEBUG]   Host flags: ${CLI_HOST_FLAGS[*]+"${CLI_HOST_FLAGS[*]}"}" >&2
+        echo "[DEBUG]   Control flags: ${CLI_CONTROL_FLAGS[*]+"${CLI_CONTROL_FLAGS[*]}"}" >&2
         echo "[DEBUG]   Script command: ${CLI_SCRIPT_COMMAND}" >&2
-        echo "[DEBUG]   Pass-through: ${CLI_PASS_THROUGH[*]}" >&2
+        echo "[DEBUG]   Pass-through: ${CLI_PASS_THROUGH[*]+"${CLI_PASS_THROUGH[*]}"}" >&2
     fi
 }
 

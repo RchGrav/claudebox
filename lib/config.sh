@@ -29,7 +29,7 @@ get_profile_packages() {
         ruby) echo "ruby-full ruby-dev libreadline-dev libyaml-dev libsqlite3-dev sqlite3 libxml2-dev libxslt1-dev libcurl4-openssl-dev software-properties-common" ;;
         php) echo "php php-cli php-fpm php-mysql php-pgsql php-sqlite3 php-curl php-gd php-mbstring php-xml php-zip composer" ;;
         database) echo "postgresql-client mysql-client sqlite3 redis-tools mongodb-clients" ;;
-        devops) echo "docker.io docker-compose kubectl helm terraform ansible awscli" ;;
+        devops) echo "docker.io docker-compose ansible awscli" ;;  # kubectl, helm, terraform installed via scripts
         web) echo "nginx apache2-utils httpie" ;;
         embedded) echo "gcc-arm-none-eabi gdb-multiarch openocd picocom minicom screen" ;;
         datascience) echo "r-base" ;;
@@ -130,7 +130,7 @@ read_profile_section() {
         done < <(sed -n "/^\[$section\]/,/^\[/p" "$profile_file" | tail -n +2 | grep -v '^\[')
     fi
 
-    printf '%s\n' "${result[@]}"
+    printf '%s\n' "${result[@]+"${result[@]}"}"
 }
 
 update_profile_section() {
@@ -140,20 +140,29 @@ update_profile_section() {
     local new_items=("$@")
 
     local existing_items=()
-    readarray -t existing_items < <(read_profile_section "$profile_file" "$section")
+    # Bash 3.2 compatible - no readarray
+    while IFS= read -r line; do
+        existing_items+=("$line")
+    done < <(read_profile_section "$profile_file" "$section")
 
     local all_items=()
-    for item in "${existing_items[@]}"; do
-        [[ -n "$item" ]] && all_items+=("$item")
-    done
-
-    for item in "${new_items[@]}"; do
-        local found=false
-        for existing in "${all_items[@]}"; do
-            [[ "$existing" == "$item" ]] && found=true && break
+    if [ ${#existing_items[@]} -gt 0 ]; then
+        for item in "${existing_items[@]+"${existing_items[@]}"}"; do
+            [[ -n "$item" ]] && all_items+=("$item")
         done
-        [[ "$found" == "false" ]] && all_items+=("$item")
-    done
+    fi
+
+    if [ ${#new_items[@]} -gt 0 ]; then
+        for item in "${new_items[@]+"${new_items[@]}"}"; do
+            local found=false
+            if [ ${#all_items[@]} -gt 0 ]; then
+                for existing in "${all_items[@]+"${all_items[@]}"}"; do
+                    [[ "$existing" == "$item" ]] && found=true && break
+                done
+            fi
+            [[ "$found" == "false" ]] && all_items+=("$item")
+        done
+    fi
 
     {
         if [[ -f "$profile_file" ]]; then
@@ -169,9 +178,11 @@ update_profile_section() {
         fi
 
         echo "[$section]"
-        for item in "${all_items[@]}"; do
-            echo "$item"
-        done
+        if [ ${#all_items[@]} -gt 0 ]; then
+            for item in "${all_items[@]+"${all_items[@]}"}"; do
+                echo "$item"
+            done
+        fi
         echo ""
     } > "${profile_file}.tmp" && mv "${profile_file}.tmp" "$profile_file"
 }
@@ -186,7 +197,7 @@ get_current_profiles() {
         done < <(read_profile_section "$profiles_file" "profiles")
     fi
     
-    printf '%s\n' "${current_profiles[@]}"
+    printf '%s\n' "${current_profiles[@]+"${current_profiles[@]}"}"
 }
 
 # -------- Profile installation functions for Docker builds -------------------
@@ -271,11 +282,8 @@ EOF
 
 get_profile_javascript() {
     cat << 'EOF'
-RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.3/install.sh | bash
-ENV NVM_DIR="/home/claude/.nvm"
-RUN . $NVM_DIR/nvm.sh && nvm install --lts
 USER claude
-RUN bash -c "source $NVM_DIR/nvm.sh && npm install -g typescript eslint prettier yarn pnpm"
+RUN bash -c "source /home/claude/.nvm/nvm.sh && npm install -g typescript eslint prettier yarn pnpm"
 USER root
 EOF
 }
@@ -322,9 +330,20 @@ get_profile_database() {
 
 get_profile_devops() {
     local packages=$(get_profile_packages "devops")
+    local terraform_version="${CLAUDEBOX_TERRAFORM_VERSION:-1.9.8}"
     if [[ -n "$packages" ]]; then
         echo "RUN apt-get update && apt-get install -y $packages && apt-get clean"
     fi
+    cat << EOF
+RUN ARCH=\$(dpkg --print-architecture) && \\
+    curl -fsSL "https://dl.k8s.io/release/\$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/\${ARCH}/kubectl" -o /usr/local/bin/kubectl && \\
+    chmod +x /usr/local/bin/kubectl && \\
+    curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 -o /tmp/get-helm-3 && \\
+    bash /tmp/get-helm-3 && rm /tmp/get-helm-3 && \\
+    curl -fsSL "https://releases.hashicorp.com/terraform/${terraform_version}/terraform_${terraform_version}_linux_\${ARCH}.zip" -o /tmp/terraform.zip && \\
+    unzip -o /tmp/terraform.zip -d /usr/local/bin && \\
+    rm /tmp/terraform.zip
+EOF
 }
 
 get_profile_web() {
