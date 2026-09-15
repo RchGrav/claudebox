@@ -1,11 +1,30 @@
 #!/bin/bash
 set -euo pipefail
 
+allow_clipboard_bridge() {
+    [[ -n ${CLAUDEBOX_CLIPBOARD_URL:-} ]] || return 0
+    local port="${CLAUDEBOX_CLIPBOARD_PORT:-}"
+    if [[ ! "$port" =~ ^[0-9]{1,5}$ ]] || ((10#$port < 1 || 10#$port > 65535)) ||
+        [[ "$CLAUDEBOX_CLIPBOARD_URL" != "http://host.docker.internal:$port" ]] ||
+        [[ -z ${CLAUDEBOX_CLIPBOARD_TOKEN:-} ]]; then
+        printf 'Invalid clipboard bridge configuration\n' >&2
+        return 1
+    fi
+    local addresses address
+    addresses=$(getent ahostsv4 host.docker.internal | awk '{print $1}' | sort -u) || return 1
+    [[ -n "$addresses" ]] || return 1
+    while IFS= read -r address; do
+        iptables -A OUTPUT -p tcp -d "$address" --dport "$port" -j ACCEPT || return 1
+    done <<< "$addresses"
+}
 
 if [ "${DISABLE_FIREWALL:-false}" = "true" ]; then
     rm -f "$0"
     exit 0
 fi
+# Fail closed even if rule installation or domain resolution fails below.
+iptables -P OUTPUT DROP
+iptables -P INPUT DROP
 iptables -F OUTPUT 2>/dev/null || true
 iptables -F INPUT 2>/dev/null || true
 iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
@@ -42,7 +61,7 @@ if command -v ipset >/dev/null 2>&1; then
         if [[ "$domain" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$ ]]; then
             ipset add allowed-ips $domain 2>/dev/null || true
         else
-            ips=$(getent hosts $domain 2>/dev/null | awk '{print $1}')
+            ips=$(getent ahostsv4 "$domain" 2>/dev/null | awk '{print $1}' | sort -u) || ips=""
             for ip in $ips; do
                 ipset add allowed-domains $ip 2>/dev/null || true
             done
@@ -55,13 +74,12 @@ else
         if [[ "$domain" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$ ]]; then
             iptables -A OUTPUT -d $domain -j ACCEPT
         else
-            ips=$(getent hosts $domain 2>/dev/null | awk '{print $1}')
+            ips=$(getent ahostsv4 "$domain" 2>/dev/null | awk '{print $1}' | sort -u) || ips=""
             for ip in $ips; do
                 iptables -A OUTPUT -d $ip -j ACCEPT
             done
         fi
     done
 fi
-iptables -P OUTPUT DROP
-iptables -P INPUT DROP
+allow_clipboard_bridge
 rm -f "$(realpath "$0")"

@@ -15,8 +15,10 @@ WORKDIR /workspace
 # Copy entrypoint (in case it needs updating)
 USER root
 COPY --chown=claude docker-entrypoint.sh /usr/local/bin/docker-entrypoint
+COPY --chown=claude init-firewall /home/claude/init-firewall
 RUN sed -i 's|DOCKERUSER|claude|g' /usr/local/bin/docker-entrypoint && \
-    chmod +x /usr/local/bin/docker-entrypoint
+    sed -i 's|DOCKERUSER|claude|g' /home/claude/init-firewall && \
+    chmod +x /usr/local/bin/docker-entrypoint /home/claude/init-firewall
 
 # Set the entrypoint
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint"]

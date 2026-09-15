@@ -92,6 +92,21 @@ CI runs the portable suites on Linux and macOS, including the installed artifact
 ShellCheck errors fail CI. Existing non-error diagnostics remain visible and are
 limited by `tooling/ci/shellcheck-baseline.txt`; newly added diagnostics fail CI.
 
+The clipboard protocol tests use only Python and Node standard libraries:
+
+```bash
+python3 -m unittest discover -s tests -p test_clipboard_server.py
+node --test tests/test_clipboard_client.js
+/bin/bash tests/test_clipboard_lifecycle.sh
+/bin/bash tests/test_clipboard_firewall.sh
+/bin/bash tests/test_slot_selection.sh
+```
+
+`test_container_integration.sh` runs the production entrypoint and host mount
+builder against real Docker containers, checking Python persistence across runs
+and slots. It downloads a Debian/uv fixture and needs a working Docker daemon.
+Its Claude command is a fixture; it does not authenticate with Anthropic.
+
 ## macOS Testing
 
 These tests are particularly important for macOS users, as macOS ships with Bash 3.2 by default. The Docker test ensures compatibility without needing access to a Mac.

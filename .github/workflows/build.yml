@@ -51,11 +51,18 @@ jobs:
           /bin/bash "$HOME/.claudebox/source/tests/test_runtime_regressions.sh"
           /bin/bash "$HOME/.claudebox/source/tests/test_profile_download_failure.sh"
           /bin/bash "$HOME/.claudebox/source/tests/test_dockerfile_template.sh"
+          /bin/bash "$HOME/.claudebox/source/tests/test_slot_selection.sh"
+          /bin/bash "$HOME/.claudebox/source/tests/test_clipboard_lifecycle.sh"
+          /bin/bash "$HOME/.claudebox/source/tests/test_clipboard_firewall.sh"
+          python3 -m unittest discover -s "$HOME/.claudebox/source/tests" -p test_clipboard_server.py
+          node --test "$HOME/.claudebox/source/tests/test_clipboard_client.js"
 
   release:
     needs: test-installer
     runs-on: ubuntu-latest
     if: github.event_name == 'release'
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
@@ -64,11 +71,7 @@ jobs:
         run: bash .builder/build.sh
 
       - name: Upload Release Asset
-        uses: actions/upload-release-asset@v1
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: ./dist/claudebox.run
-          asset_name: claudebox.run
-          asset_content_type: application/x-sh
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$RELEASE_TAG" ./dist/claudebox.run --clobber

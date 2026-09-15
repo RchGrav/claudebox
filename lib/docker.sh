@@ -91,6 +91,29 @@ run_claudebox_container() (
     local run_mode="$2"  # "interactive", "detached", "pipe", or "attached"
     shift 2
     local container_args=("$@")
+
+    # These resources are scoped by the subshell, not function-local bindings:
+    # Bash 3.2 can unwind locals before an EXIT trap on an errexit path.
+    clipboard_pid="" clipboard_dir="" mcp_temp_dir=""
+    cleanup_container_runtime() {
+        if [[ -n "$clipboard_pid" || -n "$clipboard_dir" ]]; then
+            clipboard_bridge_stop
+        fi
+        if [[ -n "$mcp_temp_dir" ]]; then
+            rm -rf -- "$mcp_temp_dir"
+        fi
+    }
+    trap cleanup_container_runtime EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+
+    if [[ ${CLAUDEBOX_CLIPBOARD:-false} == true && -z ${CLAUDEBOX_CLIPBOARD_URL:-} ]]; then
+        if [[ "$run_mode" == detached ]]; then
+            printf 'ERROR: --clipboard requires an interactive or attached session.\n' >&2
+            return 1
+        fi
+        clipboard_bridge_start || return 1
+    fi
     
     # Handle "attached" mode - start detached, wait, then attach
     if [[ "$run_mode" == "attached" ]]; then
@@ -114,6 +137,19 @@ run_claudebox_container() (
     fi
     
     local docker_args=()
+
+    if [[ ${CLAUDEBOX_CLIPBOARD:-false} == true ]]; then
+        local clipboard_command
+        for clipboard_command in xclip xsel wl-paste wl-copy; do
+            docker_args+=(-v "${CLAUDEBOX_SCRIPT_DIR}/build/clipboard-client.js:/opt/claudebox-clipboard/$clipboard_command:ro")
+        done
+        docker_args+=(
+            -e "CLAUDEBOX_CLIPBOARD_URL=$CLAUDEBOX_CLIPBOARD_URL"
+            -e "CLAUDEBOX_CLIPBOARD_TOKEN=$CLAUDEBOX_CLIPBOARD_TOKEN"
+            -e "CLAUDEBOX_CLIPBOARD_PORT=$CLAUDEBOX_CLIPBOARD_PORT"
+            -e "DISPLAY=${DISPLAY:-:0}"
+        )
+    fi
     
     # Set run mode
     case "$run_mode" in
@@ -292,9 +328,7 @@ run_claudebox_container() (
     
     # Keep temporary configuration and its EXIT trap inside this invocation's
     # subshell. The caller's traps survive, and local paths remain in scope on exit.
-    local mcp_temp_dir
     mcp_temp_dir=$(mktemp -d "${TMPDIR:-/tmp}/claudebox-mcp.XXXXXX") || return 1
-    trap 'rm -rf -- "$mcp_temp_dir"' EXIT
 
     # Helper function to create and merge MCP config files
     create_mcp_config_file() {
@@ -419,7 +453,7 @@ run_claudebox_container() (
     
     # Run the container
     if [[ "$VERBOSE" == "true" ]]; then
-        echo "[DEBUG] Docker run command: docker run ${docker_args[*]}" >&2
+        printf '[DEBUG] Starting Docker image %s (mode %s)\n' "$IMAGE_NAME" "$run_mode" >&2
     fi
     docker run "${docker_args[@]}"
     local exit_code=$?

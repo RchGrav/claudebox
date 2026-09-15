@@ -8,6 +8,10 @@ export PATH="/home/DOCKERUSER/.local/bin:$PATH"
 # Also set PATH for runuser commands
 export RUNUSER_PATH="/home/DOCKERUSER/.local/bin:$PATH"
 
+if [[ -n ${CLAUDEBOX_CLIPBOARD_URL:-} ]]; then
+    export PATH="/opt/claudebox-clipboard:$PATH"
+fi
+
 ENABLE_SUDO=false
 DISABLE_FIREWALL=false
 SHELL_MODE=false
@@ -29,7 +33,6 @@ export DISABLE_FIREWALL
 
 # Debug output (check environment variable)
 if [[ "${VERBOSE:-false}" == "true" ]]; then
-    echo "DEBUG: Arguments: $@" >&2
     echo "DEBUG: Number of args: $#" >&2
     echo "DEBUG: ENABLE_SUDO=$ENABLE_SUDO" >&2
     echo "DEBUG: DISABLE_FIREWALL=$DISABLE_FIREWALL" >&2
@@ -37,7 +40,10 @@ if [[ "${VERBOSE:-false}" == "true" ]]; then
 fi
 
 if [ -f /home/DOCKERUSER/init-firewall ]; then
-    /home/DOCKERUSER/init-firewall || true
+    /home/DOCKERUSER/init-firewall || {
+        echo 'ERROR: Firewall setup failed; refusing to start the session.' >&2
+        exit 1
+    }
 fi
 
 # Handle sudo access based on --enable-sudo flag

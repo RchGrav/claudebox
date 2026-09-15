@@ -44,7 +44,7 @@ export VERBOSE=false
 LIB_DIR="${SCRIPT_DIR}/lib"
 
 # Load libraries in order - cli.sh must be loaded first for parsing
-for lib in cli common env os state project docker config commands welcome preflight; do
+for lib in cli common env os state project clipboard docker config commands welcome preflight; do
     # shellcheck disable=SC1090
     source "${LIB_DIR}/${lib}.sh"
 done
@@ -268,13 +268,27 @@ main() {
     # Get the actual parent folder name for the project
     local parent_folder_name=$(generate_parent_folder_name "$PROJECT_DIR")
     
-    # Get the slot to use (might be empty)
-    project_folder_name=$(get_project_folder_name "$PROJECT_DIR")
-    
-    # Early exit if command needs Docker but no slots exist
-    if [[ "$project_folder_name" == "NONE" ]] && [[ "$cmd_requirements" == "docker" ]]; then
-        show_no_slots_menu
-        exit 1
+    # Get the slot to use. Explicit slot selection validates the requested slot
+    # directly; default launch still selects the first inactive slot.
+    if [[ "${CLI_SCRIPT_COMMAND:-}" == "slot" ]]; then
+        local slot_num="${CLI_PASS_THROUGH[0]:-}"
+        if [[ -z "$slot_num" ]] || [[ ! "$slot_num" =~ ^[0-9]+$ ]] || (( 10#$slot_num < 1 )); then
+            error "Usage: claudebox slot <number> [claude arguments...]"
+        fi
+        local selected_slot_dir
+        selected_slot_dir=$(get_slot_dir "$PROJECT_DIR" "$slot_num")
+        if [[ ! -d "$selected_slot_dir" ]]; then
+            error "Slot $slot_num does not exist. Run 'claudebox slots' to see available slots."
+        fi
+        project_folder_name=$(basename "$selected_slot_dir")
+    else
+        project_folder_name=$(get_project_folder_name "$PROJECT_DIR")
+
+        # Early exit if command needs Docker but no slots exist
+        if [[ "$project_folder_name" == "NONE" ]] && [[ "$cmd_requirements" == "docker" ]]; then
+            show_no_slots_menu
+            exit 1
+        fi
     fi
     
     # Always set IMAGE_NAME based on parent folder
