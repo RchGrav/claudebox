@@ -57,9 +57,9 @@ The Ultimate Claude Code Docker Development Environment - Run Claude AI's coding
 
 ## 🛠️ Installation
 
-The source version is v2.0.1. Release downloads are separate from changes merged
-into `main`; use [Development Installation](#development-installation) to get the
-current fixes without waiting for a new release asset.
+The source version is v2.0.1. Release downloads contain the latest published
+version; use [Development Installation](#development-installation) to test changes
+on `main` that have not yet been released.
 
 ### Method 1: Self-Extracting Installer (Recommended)
 
@@ -154,7 +154,9 @@ claudebox slot 1            # Launch slot 1; authenticate inside Claude if neede
 
 For another simultaneous session, run `claudebox create` again and launch the new
 number shown by `claudebox slots`. Bare `claudebox` selects an available slot.
-An active slot is already in use; exit its running session or use another slot.
+`claudebox slot <number>` attaches to that slot if it is already running. Extra
+Claude arguments require an inactive slot because they cannot change a running
+session. Bare `claudebox` continues to select an inactive slot.
 
 `claudebox revoke` removes the highest-numbered slot if it is inactive, including
 its saved authentication and history; it refuses to remove an active slot. `claudebox revoke all` removes inactive slots while
@@ -181,6 +183,42 @@ claudebox info
 # Get help
 claudebox --help        # Shows Claude help with ClaudeBox additions
 ```
+
+### macOS Clipboard
+
+Enable clipboard access when starting a session:
+
+```bash
+claudebox --clipboard
+# Or select an inactive slot:
+claudebox --clipboard slot 1
+```
+
+This optional feature requires Python 3 on the Mac. It lets container applications
+read clipboard images and replace clipboard text while the session is running.
+It does not expose host clipboard text for reading. Without this option, ClaudeBox
+does not start a clipboard service.
+
+Use Claude Code's image-paste shortcut (`Ctrl+V` in most terminals) after copying
+an image or screenshot. Text copy through Linux clipboard utilities is forwarded
+to macOS too. Images are limited to 20 MiB and text writes to 1 MiB. The bridge uses
+a random session token, permits only its host TCP port through the container
+firewall, and shuts down with the launching session. Detached launches do not
+start an independent clipboard service.
+The HTTP listener binds only to host loopback; treat the session token as a
+secret and enable this only for containers you trust with that
+clipboard access. Enabling it on an already-running slot requires restarting that
+slot unless it was started with clipboard support.
+If Docker detach keys leave the container running after its launcher exits, the
+bridge stops too; restart that slot to restore clipboard access.
+
+Terminal selection is separate from application clipboard access. In Apple
+Terminal, if a wrapped login URL cannot be selected, use **Select All**, copy into
+an editor, then copy just the URL. This workaround was confirmed in
+[issue #107](https://github.com/RchGrav/claudebox/issues/107#issuecomment-4349351938).
+Terminals that support clipboard escape sequences may require permission in
+their settings. See [tmux's clipboard guide](https://github.com/tmux/tmux/wiki/Clipboard)
+when using host tmux.
 
 ### Multi-Instance Support
 

@@ -20,12 +20,17 @@ jobs:
       run: |
         for test_script in tests/test_*.sh; do
           case "$test_script" in
-            tests/test_in_bash32_docker.sh|tests/test_container_integration.sh)
+            tests/test_in_bash32_docker.sh|tests/test_*integration.sh)
               continue
               ;;
           esac
           /bin/bash "$test_script"
         done
+
+    - name: Test clipboard protocol
+      run: |
+        python3 -m unittest discover -s tests -p test_clipboard_server.py
+        node --test tests/test_clipboard_client.js
         
     - name: Run Docker shell tests (Linux only)
       if: runner.os == 'Linux'
@@ -48,6 +53,7 @@ jobs:
         
     - name: Run ShellCheck with baseline
       run: |
+        shellcheck --severity=error build/docker-entrypoint build/init-firewall
         bash tooling/ci/shellcheck-baseline.sh \
           main.sh \
           lib/*.sh \
@@ -89,6 +95,11 @@ jobs:
         /bin/bash "$HOME/.claudebox/source/tests/test_runtime_regressions.sh"
         /bin/bash "$HOME/.claudebox/source/tests/test_profile_download_failure.sh"
         /bin/bash "$HOME/.claudebox/source/tests/test_dockerfile_template.sh"
+        /bin/bash "$HOME/.claudebox/source/tests/test_slot_selection.sh"
+        /bin/bash "$HOME/.claudebox/source/tests/test_clipboard_lifecycle.sh"
+        /bin/bash "$HOME/.claudebox/source/tests/test_clipboard_firewall.sh"
+        python3 -m unittest discover -s "$HOME/.claudebox/source/tests" -p test_clipboard_server.py
+        node --test "$HOME/.claudebox/source/tests/test_clipboard_client.js"
         
     - name: Upload installer artifact
       uses: actions/upload-artifact@v4

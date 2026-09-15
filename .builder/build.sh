@@ -42,6 +42,8 @@ tar -czf "$TEMP_ARCHIVE" \
   --exclude='dist' \
   --exclude='claudebox.run' \
   --exclude='*.swp' \
+  --exclude='__pycache__' \
+  --exclude='*.pyc' \
   --exclude='*~' \
   --exclude='archive.tar.gz' \
   --exclude='*.tar.gz' \

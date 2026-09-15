@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [2.0.1] - 2026-09-15
 
 ### Fixed
+- **Firewall startup**: Unresolvable allowed domains no longer leave default
+  policies open, and failed firewall setup stops session startup.
+- **Slot selection**: Explicit slot numbers are validated independently of idle
+  slot availability. Selecting a running slot attaches to its existing container.
 - **Bash 3.2 / `set -u`**: Fresh installs on macOS aborted with
   `lib/cli.sh: line 22: all_args[@]: unbound variable`. Empty array
   expansions are now guarded across the CLI, config, docker, and profile
@@ -28,6 +32,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   removes intermediate files on success and failure.
 
 ### Added
+- Opt-in macOS clipboard bridge (`--clipboard`) for image paste and text copy,
+  with per-session authentication and cleanup. Requires host Python 3.
 - `tests/test_cli_bash32.sh` drives `main.sh` end to end under real
   Bash 3.2 and fails on any unbound variable; `test_in_bash32_docker.sh`
   now exits non-zero on failure.

@@ -41,8 +41,9 @@ _cmd_slot() {
     shift || true  # Remove slot number from arguments
     
     # Validate slot number
-    if [[ ! "$slot_num" =~ ^[0-9]+$ ]]; then
+    if [[ -z "$slot_num" ]] || [[ ! "$slot_num" =~ ^[0-9]+$ ]] || (( 10#$slot_num < 1 )); then
         error "Usage: claudebox slot <number> [claude arguments...]"
+        return 1
     fi
     
     # Get the slot directory
@@ -52,6 +53,7 @@ _cmd_slot() {
     # Check if slot exists
     if [[ ! -d "$slot_dir" ]]; then
         error "Slot $slot_num does not exist. Run 'claudebox slots' to see available slots."
+        return 1
     fi
     
     # Set up environment for this specific slot
@@ -70,6 +72,32 @@ _cmd_slot() {
     # Get parent folder name for container naming
     local parent_folder_name=$(generate_parent_folder_name "$PROJECT_DIR")
     local container_name="claudebox-${parent_folder_name}-${slot_name}"
+
+    if docker ps --format "{{.Names}}" | grep -q "^${container_name}$"; then
+        if [[ $# -gt 0 ]]; then
+            error "Slot $slot_num is already running. Run 'claudebox slot $slot_num' to attach, or stop it first with 'claudebox kill $slot_name'."
+            return 1
+        fi
+        if [[ ${CLAUDEBOX_CLIPBOARD:-false} == true ]]; then
+            local container_env
+            local bridge_url=""
+            local bridge_token=""
+            local env_line
+            container_env=$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$container_name" 2>/dev/null || true)
+            while IFS= read -r env_line; do
+                case "$env_line" in
+                    CLAUDEBOX_CLIPBOARD_URL=*) bridge_url="${env_line#CLAUDEBOX_CLIPBOARD_URL=}" ;;
+                    CLAUDEBOX_CLIPBOARD_TOKEN=*) bridge_token="${env_line#CLAUDEBOX_CLIPBOARD_TOKEN=}" ;;
+                esac
+            done <<< "$container_env"
+            if ! clipboard_bridge_probe "$bridge_url" "$bridge_token"; then
+                error "Slot $slot_num is already running without live clipboard support. Stop it with 'claudebox kill $slot_name', then start it with 'claudebox --clipboard slot $slot_num'."
+                return 1
+            fi
+        fi
+        docker attach "$container_name"
+        return $?
+    fi
     
     # If we're in tmux, get the pane ID and pass it through
     local tmux_pane_id=""
