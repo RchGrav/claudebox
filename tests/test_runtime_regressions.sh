@@ -109,6 +109,43 @@ check 'admin shell exits successfully after saving changes' test "$status" -eq 0
 check 'admin shell commits exactly once' test "$(wc -l < "$SANDBOX/commits" | tr -d ' ')" -eq 1
 check 'admin shell removes its stopped container' test ! -f "$SANDBOX/container"
 
+# Optional host inputs must be passed as whole Docker arguments.
+absent_arg() { ! grep -Fxq -- "$1" "$SANDBOX/args"; }
+check 'missing gitconfig is not mounted' absent_arg "$HOME/.gitconfig:/home/claude/.gitconfig:ro"
+check 'missing env file is not passed to Docker' absent_arg --env-file
+printf '[user]\n    name = Test User\n' > "$HOME/.gitconfig"
+printf 'GH_TOKEN=test-token\nANTHROPIC_BASE_URL=https://example.invalid\n' > "$PROJECT_DIR/.env"
+"$BASH" "$SANDBOX/run.sh"
+check 'existing gitconfig is mounted read-only' grep -Fxq "$HOME/.gitconfig:/home/claude/.gitconfig:ro" "$SANDBOX/args"
+check 'env file is loaded by Docker' grep -Fxq -- '--env-file' "$SANDBOX/args"
+check 'env file path with spaces remains a single argument' grep -Fxq "$PROJECT_DIR/.env" "$SANDBOX/args"
+check 'env file remains mounted read-only' grep -Fxq "$PROJECT_DIR/.env:/workspace/.env:ro" "$SANDBOX/args"
+
+# A dedicated SSH directory takes priority even before its first key is created.
+mkdir -p "$HOME/.ssh"
+printf 'host key fixture\n' > "$HOME/.ssh/id_test"
+"$BASH" "$SANDBOX/run.sh"
+check 'host SSH fallback remains read-only' grep -Fxq "$HOME/.ssh:/home/claude/.ssh:ro" "$SANDBOX/args"
+mkdir -p "$CLAUDEBOX_HOME/ssh"
+"$BASH" "$SANDBOX/run.sh"
+check 'empty dedicated SSH directory is mounted read-write' grep -Fxq "$CLAUDEBOX_HOME/ssh:/home/claude/.ssh" "$SANDBOX/args"
+check 'empty dedicated SSH directory does not fall back to host keys' absent_arg "$HOME/.ssh:/home/claude/.ssh:ro"
+printf 'dedicated key fixture\n' > "$CLAUDEBOX_HOME/ssh/id_test"
+"$BASH" "$SANDBOX/run.sh"
+check 'populated dedicated SSH directory takes priority' grep -Fxq "$CLAUDEBOX_HOME/ssh:/home/claude/.ssh" "$SANDBOX/args"
+rm -rf "$CLAUDEBOX_HOME/ssh" "$HOME/.ssh"
+"$BASH" "$SANDBOX/run.sh"
+check 'missing SSH directories do not create a host mount' absent_arg "$HOME/.ssh:/home/claude/.ssh:ro"
+
+# A missing host API key must not erase the value from the env file.
+unset ANTHROPIC_API_KEY
+"$BASH" "$SANDBOX/run.sh"
+check 'unset host API key does not override the env file' absent_arg 'ANTHROPIC_API_KEY='
+ANTHROPIC_API_KEY=host-test-key "$BASH" "$SANDBOX/run.sh"
+check 'explicit host API key is forwarded' grep -Fxq 'ANTHROPIC_API_KEY=host-test-key' "$SANDBOX/args"
+ANTHROPIC_API_KEY='' "$BASH" "$SANDBOX/run.sh"
+check 'explicitly empty host API key still overrides the env file' grep -Fxq 'ANTHROPIC_API_KEY=' "$SANDBOX/args"
+
 source "$ROOT_DIR/lib/config.sh"
 check 'DevOps profile retains AWS CLI' bash -c 'case " $(get_profile_packages devops) " in *" awscli "*) exit 0;; *) exit 1;; esac'
 printf '\n%d passed; %d failed\n' "$PASSED" "$FAILED"

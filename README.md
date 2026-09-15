@@ -57,7 +57,9 @@ The Ultimate Claude Code Docker Development Environment - Run Claude AI's coding
 
 ## 🛠️ Installation
 
-ClaudeBox v2.0.1 offers two installation methods:
+The source version is v2.0.1. Release downloads are separate from changes merged
+into `main`; use [Development Installation](#development-installation) to get the
+current fixes without waiting for a new release asset.
 
 ### Method 1: Self-Extracting Installer (Recommended)
 
@@ -80,12 +82,14 @@ This will:
 For manual installation or custom locations, use the archive:
 
 ```bash
-# Download the archive
-wget https://github.com/RchGrav/claudebox/releases/latest/download/claudebox-2.0.1.tar.gz
+# Download a versioned archive from the Releases page, then set its filename.
+# The latest published release at the time of this update is v2.0.0.
+ARCHIVE=claudebox-2.0.0.tar.gz
+wget "https://github.com/RchGrav/claudebox/releases/latest/download/$ARCHIVE"
 
 # Extract to your preferred location
 mkdir -p ~/my-tools/claudebox
-tar -xzf claudebox-2.0.1.tar.gz -C ~/my-tools/claudebox
+tar -xzf "$ARCHIVE" -C ~/my-tools/claudebox --strip-components=1
 
 # Run main.sh to create symlink
 cd ~/my-tools/claudebox
@@ -106,8 +110,8 @@ cd claudebox
 # Build the installer
 bash .builder/build.sh
 
-# Run the installer
-./claudebox.run
+# Run the installer built from this checkout
+./dist/claudebox.run profiles
 ```
 
 ### PATH Configuration
@@ -132,6 +136,32 @@ The installer will:
 
 
 ## 📚 Usage
+
+### First Project and Slots
+
+A **slot** is a persistent Claude session/configuration directory for a project.
+Slots share that project's workspace, Docker image, profiles, and Python environment;
+each slot has its own Claude authentication, history, and tool configuration.
+The running container is temporary; the slot's mounted data survives normal exit.
+
+```bash
+cd ~/projects/my-project
+claudebox create            # Create your first slot
+claudebox slots             # Show slot numbers, authentication and running state
+claudebox add python        # Optional: add development profiles
+claudebox slot 1            # Launch slot 1; authenticate inside Claude if needed
+```
+
+For another simultaneous session, run `claudebox create` again and launch the new
+number shown by `claudebox slots`. Bare `claudebox` selects an available slot.
+An active slot is already in use; exit its running session or use another slot.
+
+`claudebox revoke` removes the highest-numbered slot if it is inactive, including
+its saved authentication and history; it refuses to remove an active slot. `claudebox revoke all` removes inactive slots while
+skipping active ones. Neither command deletes the project workspace.
+
+See [Installation, persistence and customization](docs/operations.md) for installer
+internals, actual storage paths, host access to session logs, and persistent tools.
 
 ### Basic Usage
 
@@ -350,30 +380,69 @@ claudebox rebuild
 ## 🔧 Configuration
 
 ClaudeBox stores data in:
-- `~/.claude/` - Global Claude configuration (mounted read-only)
-- `~/.claudebox/` - Global ClaudeBox data
-- `~/.claudebox/profiles/` - Per-project profile configurations (*.ini files)
-- `~/.claudebox/<project-name>/` - Project-specific data:
-  - `.claude/` - Project auth state
-  - `.claude.json` - Project API configuration
-  - `.zsh_history` - Shell history
-  - `.config/` - Tool configurations
-  - `firewall/allowlist` - Network allowlist
-- Current directory mounted as `/workspace` in container
+- `~/.claudebox/source/` - Installed source files
+- `~/.claudebox/projects/<project-id>/` - Shared project state, including `profiles.ini`
+- `~/.claudebox/projects/<project-id>/<slot-id>/.claude/` - Per-slot authentication, sessions and history
+- `~/.claudebox/projects/<project-id>/<slot-id>/.claude.json`, `.config/`, `.cache/` - Per-slot settings and tool data
+- `~/.claudebox/projects/<project-id>/.venv/` and `.local/share/uv/python/` - Shared Python environment and managed interpreters
+- `~/.claudebox/ssh/` - Optional dedicated SSH directory
+- Current project directory - Mounted read-write at `/workspace`, including a normal repository's `.git` directory
+
+The host's entire `~/.claude/` directory is **not** mounted. User MCP configuration
+is read from `~/.claude.json`; commands are synchronized separately. Global skill
+packages are not automatically imported.
+
+### SSH Key Configuration
+
+ClaudeBox prefers `~/.claudebox/ssh/` and mounts it **read-write**, allowing persistent
+`known_hosts` updates. This applies even when the directory is empty. Otherwise,
+an existing host `~/.ssh/` is mounted **read-only**.
+
+**Read-only is not secret isolation.** Container processes can read and use private
+keys in the mounted directory; read-only only prevents changing those host files.
+A dedicated directory limits which keys are exposed. An empty dedicated directory
+avoids mounting the host's normal SSH keys.
+
+```bash
+mkdir -p ~/.claudebox/ssh
+chmod 700 ~/.claudebox/ssh
+# Optional: generate a dedicated key and register its public key with your service.
+ssh-keygen -t ed25519 -f ~/.claudebox/ssh/id_ed25519 -C "claudebox@$(hostname)"
+```
+
+Use `claudebox add shell` to include `openssh-client` when `ssh` is missing. The
+profile is installed on the next image build. SSH-agent forwarding is not provided
+by this directory-mount mechanism.
 
 ### Project-Specific Features
 
 Each project automatically gets:
 - **Docker Image**: `claudebox-<project-name>` with installed profiles
-- **Profile Configuration**: `~/.claudebox/profiles/<project-name>.ini`
+- **Profile Configuration**: `~/.claudebox/projects/<project-id>/profiles.ini`
 - **Python Virtual Environment**: `.venv` created with uv when Python profile is active
 - **Firewall Allowlist**: Customizable per-project network access rules
 - **Claude Configuration**: Project-specific `.claude.json` settings
 
 ### Environment Variables
 
-- `ANTHROPIC_API_KEY` - Your Anthropic API key
-- `NODE_ENV` - Node environment (default: production)
+A project `.env` file is both mounted read-only at `/workspace/.env` and loaded by
+Docker's `--env-file`. For example:
+
+```dotenv
+ANTHROPIC_BASE_URL=https://your-api-endpoint.example
+GH_TOKEN=your-fine-grained-token
+ANTHROPIC_API_KEY=your-api-key
+```
+
+Use Docker env-file syntax (`NAME=value`), not shell commands or `export` statements.
+The file is not executed or sourced. Keep real credentials out of Git commits.
+An explicitly set host `ANTHROPIC_API_KEY` overrides the file, including an explicitly
+empty value; an unset host key leaves the file's value intact. `NODE_ENV` is explicitly
+forwarded from the host and defaults to `production`.
+
+The host's `~/.gitconfig` is also mounted read-only when it exists. Paths referenced
+by that file, such as external `include` files or credential helpers, must be available
+inside the container to work.
 
 ## 🏗️ Architecture
 
@@ -426,7 +495,7 @@ claudebox rebuild
 ### Python Virtual Environment Issues
 ClaudeBox automatically creates a venv when Python profile is active:
 ```bash
-# The venv is created at ~/.claudebox/<project>/.venv
+# The venv is created at ~/.claudebox/projects/<project-id>/.venv
 # It's automatically activated in the container
 claudebox shell
 which python  # Should show the venv python
