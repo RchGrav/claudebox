@@ -64,6 +64,13 @@ source "${LIB_DIR}/commands.clean.sh"
 source "${LIB_DIR}/commands.system.sh"
 
 # ============================================================================
+# RESUME COMMAND - Interactive cross-slot session picker
+# ============================================================================
+# Commands: resume
+# - resume: Pick and resume any session from any slot via fzf
+source "${LIB_DIR}/commands.resume.sh"
+
+# ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
 
@@ -122,6 +129,7 @@ show_help() {
   slots                           List all container slots
   slot <number>                   Launch a specific container slot
   project <name>                  Open project by name/hash from anywhere
+  resume                          Resume a session from any slot (fzf picker)
   tmux                            Launch ClaudeBox with tmux support enabled"
     
     # Check if we're in a project directory
@@ -300,6 +308,9 @@ dispatch_command() {
         project)          _cmd_project "$@" ;;
         import)           _cmd_import "$@" ;;
         kill)             _cmd_kill "$@" ;;
+
+        # Resume command
+        resume)           _cmd_resume "$@" ;;
         
         # Special commands that modify container
         config|mcp|migrate-installer) 
