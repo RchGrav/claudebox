@@ -95,6 +95,8 @@ run_claudebox_container() (
     # These resources are scoped by the subshell, not function-local bindings:
     # Bash 3.2 can unwind locals before an EXIT trap on an errexit path.
     clipboard_pid="" clipboard_dir="" mcp_temp_dir=""
+    # Invoked indirectly by EXIT; older ShellCheck versions miss trap reachability.
+    # shellcheck disable=SC2317
     cleanup_container_runtime() {
         if [[ -n "$clipboard_pid" || -n "$clipboard_dir" ]]; then
             clipboard_bridge_stop
