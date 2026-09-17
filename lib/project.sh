@@ -515,7 +515,7 @@ command_directory_checksum() {
     fi
 
     while IFS= read -r file; do
-        digest=$(sha256_file - < "$source_dir/${file#./}") || return 1
+        digest=$(sha256_file "$source_dir/${file#./}") || return 1
         manifest+="${digest}  ${file#./}"$'\n'
     done < <(cd "$source_dir" && find . -type f | LC_ALL=C sort)
 

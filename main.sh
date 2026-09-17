@@ -650,9 +650,11 @@ LABEL claudebox.project=\"$project_folder_name\""
     local final_dockerfile
     final_dockerfile=$(
         temp_pi=$(mktemp) || exit 1
-        temp_lbs=""
-        trap 'rm -f -- "$temp_pi" ${temp_lbs:+"$temp_lbs"}' EXIT
-        temp_lbs=$(mktemp) || exit 1
+        temp_lbs=$(mktemp) || {
+            rm -f -- "$temp_pi"
+            exit 1
+        }
+        trap 'if [ -n "$temp_pi" ]; then rm -f -- "$temp_pi"; fi; if [ -n "$temp_lbs" ]; then rm -f -- "$temp_lbs"; fi' EXIT
         printf '%s' "$profile_installations" > "$temp_pi"
         printf '%s' "$labels" > "$temp_lbs"
         awk -v pi_file="$temp_pi" -v lbs_file="$temp_lbs" '

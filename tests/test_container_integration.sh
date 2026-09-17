@@ -220,15 +220,19 @@ docker_probe() {
 
 venv_python_target() {
     local slot="$1"
+    local slot_name
+    slot_name="$(basename "$slot")"
 
-    docker_probe "$slot" "target-$RANDOM" '/home/claude/.claudebox/.venv/bin/python -c "import os, sys; print(os.path.realpath(sys.executable))"'
+    docker_probe "$slot" "target-$slot_name" '/home/claude/.claudebox/.venv/bin/python -c "import os, sys; print(os.path.realpath(sys.executable))"'
 }
 
 assert_venv_works_with_slot() {
     local slot="$1"
     local label="$2"
+    local slot_name
+    slot_name="$(basename "$slot")"
 
-    if ! docker_probe "$slot" "version-$RANDOM" '/home/claude/.claudebox/.venv/bin/python --version' >/dev/null 2>&1; then
+    if ! docker_probe "$slot" "version-$slot_name" '/home/claude/.claudebox/.venv/bin/python --version' >/dev/null 2>&1; then
         printf '%s venv python target: %s\n' "$label" "$(venv_python_target "$slot" 2>/dev/null || printf 'unresolved')" >&2
         fail "$label: shared venv does not resolve with this slot's .local/share mount"
     fi
