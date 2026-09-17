@@ -31,6 +31,11 @@ jobs:
       run: |
         python3 -m unittest discover -s tests -p test_clipboard_server.py
         node --test tests/test_clipboard_client.js
+
+    - name: Test clipboard integration (macOS only)
+      if: runner.os == 'macOS'
+      run: |
+        /bin/bash tests/test_clipboard_integration.sh
         
     - name: Run Docker shell tests (Linux only)
       if: runner.os == 'Linux'

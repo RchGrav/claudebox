@@ -111,6 +111,21 @@ run_claudebox_container() (
             rm -rf -- "$mcp_temp_dir"
         fi
     }
+    local previous_int_trap previous_term_trap
+    previous_int_trap="$(trap -p INT)"
+    previous_term_trap="$(trap -p TERM)"
+    restore_container_signal_traps() {
+        if [[ -n "$previous_int_trap" ]]; then
+            eval "$previous_int_trap"
+        else
+            trap - INT
+        fi
+        if [[ -n "$previous_term_trap" ]]; then
+            eval "$previous_term_trap"
+        else
+            trap - TERM
+        fi
+    }
     trap cleanup_container_runtime EXIT
     trap 'exit 130' INT
     trap 'exit 143' TERM
@@ -118,9 +133,13 @@ run_claudebox_container() (
     if [[ ${CLAUDEBOX_CLIPBOARD:-false} == true && -z ${CLAUDEBOX_CLIPBOARD_URL:-} ]]; then
         if [[ "$run_mode" == detached ]]; then
             printf 'ERROR: --clipboard requires an interactive or attached session.\n' >&2
+            restore_container_signal_traps
             return 1
         fi
-        clipboard_bridge_start || return 1
+        if ! clipboard_bridge_start; then
+            restore_container_signal_traps
+            return 1
+        fi
     fi
     
     # Handle "attached" mode - start detached, wait, then attach
@@ -140,7 +159,8 @@ run_claudebox_container() (
         
         # Attach to ready container
         docker attach "$container_name"
-        
+
+        restore_container_signal_traps
         return
     fi
     
