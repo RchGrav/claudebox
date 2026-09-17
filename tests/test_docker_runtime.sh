@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Exercise host-side Docker argument construction and MCP file lifetime.
-set -euo pipefail
+set -Eeuo pipefail
+IFS=$'\n\t'
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if [[ ${1:-} == --child ]]; then
@@ -14,6 +15,8 @@ if [[ ${1:-} == --child ]]; then
     export IMAGE_NAME=claudebox-test
     export VERBOSE=false
     export TMUX="$TEST_ROOT/tmux/default,1,0"
+    # Invoked by lib/docker.sh while constructing container arguments.
+    # shellcheck disable=SC2317
     get_slot_index() { printf '1\n'; }
     # Docker is the external boundary: inspect the actual generated files while
     # they are mounted, then return a controlled container exit status.
@@ -39,6 +42,34 @@ if [[ ${1:-} == --child ]]; then
     exit 0
 fi
 
+if [[ ${1:-} == --trap-check ]]; then
+    # shellcheck source=lib/docker.sh
+    source "$ROOT_DIR/lib/docker.sh"
+    export PROJECT_DIR="$TEST_ROOT/project"
+    export PROJECT_PARENT_DIR="$TEST_ROOT/state"
+    export PROJECT_SLOT_DIR="$PROJECT_PARENT_DIR/slot"
+    export CLAUDEBOX_HOME="$TEST_ROOT/state"
+    export DOCKER_USER=claude
+    export IMAGE_NAME=claudebox-test
+    export VERBOSE=false
+    trap 'exit 97' INT
+    trap 'exit 98' TERM
+    before_int="$(trap -p INT)"
+    before_term="$(trap -p TERM)"
+    export CLAUDEBOX_CLIPBOARD=true
+    unset CLAUDEBOX_CLIPBOARD_URL CLAUDEBOX_CLIPBOARD_TOKEN CLAUDEBOX_CLIPBOARD_PORT
+    if run_claudebox_container "" detached >/dev/null 2>&1; then
+        printf 'FAIL: detached clipboard validation unexpectedly succeeded\n' >&2
+        exit 1
+    fi
+    after_int="$(trap -p INT)"
+    after_term="$(trap -p TERM)"
+    [[ "$before_int" == "$after_int" ]] || { printf 'FAIL: INT trap was not restored\n' >&2; exit 1; }
+    [[ "$before_term" == "$after_term" ]] || { printf 'FAIL: TERM trap was not restored\n' >&2; exit 1; }
+    printf 'PASS: caller INT and TERM traps survive detached clipboard validation\n'
+    exit 0
+fi
+
 TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/claudebox-runtime.XXXXXX")
 trap 'rm -rf -- "$TEST_ROOT"' EXIT
 mkdir -p "$TEST_ROOT/home" "$TEST_ROOT/project with spaces/.claude" "$TEST_ROOT/tmux" "$TEST_ROOT/tmp"
@@ -57,3 +88,5 @@ for expected_status in 0 23; do
     [[ -f "$TEST_ROOT/parent-exit-trap" ]] || { printf 'FAIL: caller EXIT trap replaced\n'; exit 1; }
     printf 'PASS: merged MCP configuration, Python mount, cleanup and exit status %s\n' "$expected_status"
 done
+
+env HOME="$TEST_ROOT/home" TMPDIR="$TEST_ROOT/tmp" TEST_ROOT="$TEST_ROOT" "$BASH" "$0" --trap-check

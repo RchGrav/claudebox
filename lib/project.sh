@@ -269,7 +269,8 @@ get_project_folder_name() {
 
 # Get Docker image name for a specific slot
 get_image_name() {
-    local parent_folder_name=$(generate_parent_folder_name "${PROJECT_DIR}")
+    local parent_folder_name
+    parent_folder_name=$(generate_parent_folder_name "${PROJECT_DIR}")
     printf 'claudebox-%s' "${parent_folder_name}"
 }
 
@@ -280,8 +281,6 @@ _get_project_slug() {
 
 # Get project by path - now checks parent directories
 get_project_by_path() {
-    local search_path="$1"
-    local abs_path=$(realpath "$search_path" 2>/dev/null || echo "$search_path")
     
     # Check all parent directories in ~/.claudebox/projects/
     for parent_dir in "$HOME/.claudebox/projects"/*/ ; do
@@ -307,8 +306,8 @@ list_all_projects() {
         [[ -d "$parent_dir" ]] || continue
         projects_found=1
         
-        local parent_name=$(basename "$parent_dir")
-        local profiles_file="$parent_dir/profiles.ini"
+        local parent_name
+        parent_name=$(basename "$parent_dir")
         local slot_count=0
         local active_slots=0
         
@@ -351,7 +350,8 @@ resolve_project_path() {
     fi
     
     # Otherwise, get the parent directory for this path
-    local parent_name=$(get_project_folder_name "$input_path")
+    local parent_name
+    parent_name=$(get_project_folder_name "$input_path")
     echo "$parent_name"
     return 0
 }
@@ -363,13 +363,16 @@ resolve_project_path() {
 # Auto-prune counter to remove trailing missing slots
 prune_slot_counter() {
     local path="$1"
-    local parent=$(get_parent_dir "$path")
-    local max=$(read_counter "$parent")
+    local parent
+    parent=$(get_parent_dir "$path")
+    local max
+    max=$(read_counter "$parent")
     
     # Find highest existing slot
     local highest=0
     for ((idx=1; idx<=max; idx++)); do
-        local name=$(generate_container_name "$path" "$idx")
+        local name
+        name=$(generate_container_name "$path" "$idx")
         local dir="$parent/$name"
         if [ -d "$dir" ]; then
             highest=$idx
@@ -377,7 +380,7 @@ prune_slot_counter() {
     done
     
     # Update counter if we can prune
-    if [ $highest -lt $max ]; then
+    if [ $highest -lt "$max" ]; then
         write_counter "$parent" $highest
     fi
     # Always return 0 for success
@@ -387,7 +390,8 @@ prune_slot_counter() {
 # List all slots for current project
 list_project_slots() {
     local path="${1:-$PWD}"
-    local parent=$(get_parent_dir "$path")
+    local parent
+    parent=$(get_parent_dir "$path")
     
     if [ ! -d "$parent" ]; then
         echo "No project found for path: $path"
@@ -396,12 +400,13 @@ list_project_slots() {
     
     # Prune counter first
     prune_slot_counter "$path"
-    local max=$(read_counter "$parent")
+    local max
+    max=$(read_counter "$parent")
     
     logo_small
     echo
     
-    if [ $max -eq 0 ]; then
+    if [ "$max" -eq 0 ]; then
         echo "Commands:"
         printf "  %-20s %s\n" "claudebox create" "Create new slot"
         echo
@@ -429,7 +434,8 @@ list_project_slots() {
     printf "  ────   ─────────────────     ─────────  ────────\n"
     
     for ((idx=1; idx<=max; idx++)); do
-        local name=$(generate_container_name "$path" "$idx")
+        local name
+        name=$(generate_container_name "$path" "$idx")
         local dir="$parent/$name"
         local auth_icon="💀"
         local auth_text="Removed"
@@ -469,8 +475,10 @@ list_project_slots() {
 get_slot_dir() {
     local path="$1"
     local idx="${2:-0}"
-    local parent=$(get_parent_dir "$path")
-    local name=$(generate_container_name "$path" "$idx")
+    local parent
+    parent=$(get_parent_dir "$path")
+    local name
+    name=$(generate_container_name "$path" "$idx")
     echo "$parent/$name"
 }
 
@@ -478,11 +486,14 @@ get_slot_dir() {
 get_slot_index() {
     local slot_name="$1"
     local parent_dir="$2"
-    local path=$(dirname "$parent_dir")  # Get original path from parent
-    local max=$(read_counter "$parent_dir")
+    local path
+    path=$(dirname "$parent_dir")  # Get original path from parent
+    local max
+    max=$(read_counter "$parent_dir")
     
     for ((idx=1; idx<=max; idx++)); do
-        local name=$(generate_container_name "$path" "$idx")
+        local name
+        name=$(generate_container_name "$path" "$idx")
         if [[ "$name" == "$slot_name" ]]; then
             echo "$idx"
             return 0
@@ -504,7 +515,7 @@ command_directory_checksum() {
     fi
 
     while IFS= read -r file; do
-        digest=$(sha256_file - < "$source_dir/${file#./}") || return 1
+        digest=$(sha256_file "$source_dir/${file#./}") || return 1
         manifest+="${digest}  ${file#./}"$'\n'
     done < <(cd "$source_dir" && find . -type f | LC_ALL=C sort)
 
@@ -544,7 +555,8 @@ sync_commands_to_project() {
         if [[ ! -f "$cbox_checksum_file" ]]; then
             sync_cbox=true
         else
-            local stored_cbox=$(cat "$cbox_checksum_file" 2>/dev/null || echo "")
+            local stored_cbox
+            stored_cbox=$(cat "$cbox_checksum_file" 2>/dev/null || echo "")
             if [[ "$cbox_checksum" != "$stored_cbox" ]]; then
                 sync_cbox=true
             fi
@@ -557,7 +569,8 @@ sync_commands_to_project() {
         if [[ ! -f "$user_checksum_file" ]]; then
             sync_user=true
         else
-            local stored_user=$(cat "$user_checksum_file" 2>/dev/null || echo "")
+            local stored_user
+            stored_user=$(cat "$user_checksum_file" 2>/dev/null || echo "")
             if [[ "$user_checksum" != "$stored_user" ]]; then
                 sync_user=true
             fi
@@ -578,7 +591,8 @@ sync_commands_to_project() {
         # Use find to handle subdirectories properly
         if cd "$cbox_source"; then
             find . -type f | while read -r file; do
-                local dir=$(dirname "$file")
+                local dir
+                dir=$(dirname "$file")
                 mkdir -p "$commands_dir/cbox/$dir"
                 cp "$file" "$commands_dir/cbox/$file"
             done
@@ -602,7 +616,8 @@ sync_commands_to_project() {
         # Copy preserving directory structure
         if cd "$user_source"; then
             find . -type f | while read -r file; do
-                local dir=$(dirname "$file")
+                local dir
+                dir=$(dirname "$file")
                 mkdir -p "$commands_dir/user/$dir"
                 cp "$file" "$commands_dir/user/$file"
             done

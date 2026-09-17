@@ -7,9 +7,22 @@
 # ============================================================================
 
 # Four flag buckets (Bash 3.2 compatible - no associative arrays)
-readonly HOST_ONLY_FLAGS=(--verbose --clipboard rebuild)
+readonly HOST_ONLY_FLAGS=(--verbose --clipboard)
 readonly CONTROL_FLAGS=(--enable-sudo --disable-firewall)
-readonly SCRIPT_COMMANDS=(shell create slot slots revoke profiles projects profile info help -h --help add remove install allowlist clean save project tmux kill)
+readonly SCRIPT_COMMANDS=(shell create slot slots revoke profiles projects profile info help -h --help add remove install allowlist clean save project tmux kill rebuild)
+
+cli_array_contains() {
+    local needle="$1"
+    shift
+    local item
+
+    for item in "$@"; do
+        if [[ "$item" == "$needle" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
 
 # parse_cli_args - Central CLI parsing with four-bucket architecture
 # Usage: parse_cli_args "$@"
@@ -31,13 +44,13 @@ parse_cli_args() {
     
     # Iterate directly over arguments (handles empty $@ with set -u)
     for arg in "$@"; do
-        if [[ " ${HOST_ONLY_FLAGS[*]} " == *" $arg "* ]]; then
+        if cli_array_contains "$arg" "${HOST_ONLY_FLAGS[@]}"; then
             # Bucket 1: Host-only flags
             host_flags+=("$arg")
-        elif [[ " ${CONTROL_FLAGS[*]} " == *" $arg "* ]]; then
+        elif cli_array_contains "$arg" "${CONTROL_FLAGS[@]}"; then
             # Bucket 2: Control flags (pass to container)
             control_flags+=("$arg")
-        elif [[ "$found_script_command" == "false" ]] && [[ " ${SCRIPT_COMMANDS[*]} " == *" $arg "* ]]; then
+        elif [[ "$found_script_command" == "false" ]] && cli_array_contains "$arg" "${SCRIPT_COMMANDS[@]}"; then
             # Bucket 3: Script commands (first one wins)
             script_command="$arg"
             found_script_command=true
@@ -69,9 +82,6 @@ process_host_flags() {
                 --clipboard)
                     export CLAUDEBOX_CLIPBOARD=true
                     ;;
-                rebuild)
-                    export REBUILD=true
-                    ;;
                 tmux)
                     export CLAUDEBOX_WRAP_TMUX=true
                     ;;
@@ -86,7 +96,6 @@ process_host_flags() {
 # "docker" - needs Docker running and will run container
 get_command_requirements() {
     local cmd="${1:-}"
-    local subcommand="${2:-}"
     
     case "$cmd" in
         # Pure host commands - no Docker or image needed
@@ -111,7 +120,8 @@ get_command_requirements() {
 # Legacy function for compatibility
 requires_docker_image() {
     local cmd="${1:-}"
-    local req=$(get_command_requirements "$cmd")
+    local req
+    req=$(get_command_requirements "$cmd")
     [[ "$req" == "docker" ]]
 }
 
@@ -142,4 +152,4 @@ debug_parsed_args() {
 }
 
 # Export all functions
-export -f parse_cli_args process_host_flags get_command_requirements requires_docker_image requires_slot debug_parsed_args
+export -f cli_array_contains parse_cli_args process_host_flags get_command_requirements requires_docker_image requires_slot debug_parsed_args

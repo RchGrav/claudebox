@@ -31,6 +31,11 @@ jobs:
       run: |
         python3 -m unittest discover -s tests -p test_clipboard_server.py
         node --test tests/test_clipboard_client.js
+
+    - name: Test clipboard integration (macOS only)
+      if: runner.os == 'macOS'
+      run: |
+        /bin/bash tests/test_clipboard_integration.sh
         
     - name: Run Docker shell tests (Linux only)
       if: runner.os == 'Linux'
@@ -51,15 +56,11 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y shellcheck
         
-    - name: Run ShellCheck with baseline
+    - name: Run ShellCheck on all shell scripts
       run: |
-        shellcheck --severity=error build/docker-entrypoint build/init-firewall
-        bash tooling/ci/shellcheck-baseline.sh \
-          main.sh \
-          lib/*.sh \
-          .builder/*.sh \
-          tests/test_*.sh
-      
+        shellcheck -x main.sh lib/*.sh .builder/*.sh \
+          build/docker-entrypoint build/init-firewall build/generate-tools-readme \
+          tests/*.sh tooling/profiles/*.sh
   build:
     runs-on: ubuntu-latest
     needs: [test-compatibility, lint]
@@ -71,21 +72,23 @@ jobs:
       run: |
         bash .builder/build.sh
         
-    - name: Verify installer was created
+    - name: Verify installer and checksum backends
       run: |
-        test -f dist/claudebox.run
+        test -x dist/claudebox.run
         test -n "$(find dist -maxdepth 1 -name 'claudebox-*.tar.gz' -print -quit)"
         test -L claudebox.run
         echo "Installer size: $(ls -lh dist/claudebox.run | awk '{print $5}')"
-        
+        bash tests/test_installer_checksum.sh dist/claudebox.run
     - name: Test installer in temporary directory
       run: |
         TEST_HOME=$(mktemp -d)
         trap 'rm -rf "$TEST_HOME"' EXIT
         export HOME="$TEST_HOME"
+        export PATH="$HOME/.local/bin:$PATH"
         /bin/bash ./dist/claudebox.run profiles
         test -f "$HOME/.claudebox/source/main.sh"
         test -L "$HOME/.local/bin/claudebox"
+        /bin/bash ./dist/claudebox.run profiles
         "$HOME/.local/bin/claudebox" profiles
         /bin/bash "$HOME/.claudebox/source/tests/test_bash32_compat.sh"
         /bin/bash "$HOME/.claudebox/source/tests/test_cli_bash32.sh"
@@ -100,7 +103,7 @@ jobs:
         /bin/bash "$HOME/.claudebox/source/tests/test_clipboard_firewall.sh"
         python3 -m unittest discover -s "$HOME/.claudebox/source/tests" -p test_clipboard_server.py
         node --test "$HOME/.claudebox/source/tests/test_clipboard_client.js"
-        
+
     - name: Upload installer artifact
       uses: actions/upload-artifact@v4
       with:

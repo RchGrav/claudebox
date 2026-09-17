@@ -189,6 +189,30 @@ class ClipboardServerTest(unittest.TestCase):
 
         self.assertEqual(provider.calls, 0)
 
+    def test_create_server_rejects_non_positive_limits(self):
+        module = load_server_module()
+        cases = (
+            {"max_payload_bytes": 0},
+            {"max_text_bytes": 0},
+            {"max_workers": 0},
+            {"socket_timeout": 0},
+            {"max_payload_bytes": -1},
+            {"max_text_bytes": -1},
+            {"max_workers": -1},
+            {"socket_timeout": -1},
+        )
+
+        for kwargs in cases:
+            with self.subTest(**kwargs):
+                with self.assertRaises(ValueError):
+                    module.create_server(
+                        "127.0.0.1",
+                        0,
+                        "secret-token",
+                        FixtureProvider(PNG_BYTES),
+                        **kwargs,
+                    )
+
     def test_health_requires_auth_without_accessing_clipboard(self):
         module = load_server_module()
         provider = FixtureProvider(PNG_BYTES)

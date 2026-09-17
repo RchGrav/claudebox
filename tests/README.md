@@ -33,7 +33,7 @@ cd tests
 ```
 
 ### test_in_bash32_docker.sh
-Runs both test scripts in actual Bash 3.2 using Docker, then again with your local Bash version. Exits non-zero if any run fails.
+Runs the compatibility, CLI, shell failure-status, Python deployment-status, console-output, and installer-checksum tests in actual Bash 3.2 using Docker, then again with your local Bash version. Exits non-zero if any run fails.
 
 **Requirements:** Docker must be installed
 
@@ -110,3 +110,39 @@ Its Claude command is a fixture; it does not authenticate with Anthropic.
 ## macOS Testing
 
 These tests are particularly important for macOS users, as macOS ships with Bash 3.2 by default. The Docker test ensures compatibility without needing access to a Mac.
+
+## ShellCheck
+
+From the repository root, run the same command as CI:
+
+```bash
+shellcheck -x main.sh lib/*.sh .builder/*.sh \
+  build/docker-entrypoint build/init-firewall build/generate-tools-readme \
+  tests/*.sh tooling/profiles/*.sh
+```
+
+The command checks every shell script, including builder templates and test scripts,
+without lowering severity or excluding diagnostic codes globally. Source directives
+identify dynamically loaded libraries. Narrow annotations identify cross-module
+constants, nested EXIT callbacks, child-shell expressions, and installer archive markers.
+
+## Regression suites
+
+Run the non-Docker suites from the repository root:
+
+```bash
+for script in test_bash32_compat test_cli_bash32 test_runtime_regressions \
+  test_profile_download_failure test_dockerfile_template test_shell_robustness \
+  test_python_install_status test_shell_output test_installer_checksum; do
+  bash "tests/$script.sh" || exit "$?"
+done
+```
+
+The additional suites cover failed command substitutions, Python installation completion
+flags, rendered multi-profile output, and both `sha256sum` and `shasum -a 256` installer
+backends. Dockerfile assertions fail explicitly on unresolved placeholders. Runtime tests
+use a Docker boundary stub; they do not replace full image integration testing.
+
+`test_installer_checksum.sh` accepts an installer path as its first argument. From a
+packaged source archive, pass the corresponding `claudebox.run`, since builder templates
+are not included in that archive.

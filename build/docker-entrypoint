@@ -33,6 +33,7 @@ export DISABLE_FIREWALL
 
 # Debug output (check environment variable)
 if [[ "${VERBOSE:-false}" == "true" ]]; then
+    printf 'DEBUG: Arguments: %s\n' "$*" >&2
     echo "DEBUG: Number of args: $#" >&2
     echo "DEBUG: ENABLE_SUDO=$ENABLE_SUDO" >&2
     echo "DEBUG: DISABLE_FIREWALL=$DISABLE_FIREWALL" >&2
@@ -69,7 +70,7 @@ if [ -n "${CLAUDEBOX_PROJECT_NAME:-}" ]; then
             for shell_rc in /home/DOCKERUSER/.zshrc /home/DOCKERUSER/.bashrc; do
                 # Add .local/bin to PATH if not already there
                 if ! grep -q "PATH.*\.local/bin" "$shell_rc"; then
-                    echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$shell_rc"
+                    printf '%s\n' "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> "$shell_rc"
                 fi
                 # Add venv activation if not already there
                 if ! grep -q "source $VENV_DIR/bin/activate" "$shell_rc"; then
@@ -130,7 +131,7 @@ if [ -n "${CLAUDEBOX_PROJECT_NAME:-}" ]; then
                 for shell_rc in /home/DOCKERUSER/.zshrc /home/DOCKERUSER/.bashrc; do
                     # Add .local/bin to PATH if not already there
                     if ! grep -q "PATH.*\.local/bin" "$shell_rc"; then
-                        echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$shell_rc"
+                        printf '%s\n' "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> "$shell_rc"
                     fi
                     # Add venv activation if not already there
                     if ! grep -q "source $VENV_DIR/bin/activate" "$shell_rc"; then
@@ -163,13 +164,11 @@ if [ -n "${CLAUDEBOX_PROJECT_NAME:-}" ]; then
                 
                 # Remove duplicates and install
                 if [ -n "$python_packages" ]; then
-                    PATH="/home/DOCKERUSER/.local/bin:$PATH" runuser -u DOCKERUSER -- bash -c "
+                    if PATH="/home/DOCKERUSER/.local/bin:$PATH" runuser -u DOCKERUSER -- bash -c "
                         source $VENV_DIR/bin/activate
                         uv pip install $python_packages
-                    " || true
-                    
-                    # Create .pydev_flag to indicate Python dev tools are deployed
-                    if [ $? -eq 0 ]; then
+                    "; then
+                        # Mark deployment only after the installer succeeds.
                         runuser -u DOCKERUSER -- touch "$PYDEV_FLAG"
                     fi
                 fi
@@ -248,6 +247,8 @@ else
     if [[ "${1:-}" == "update" ]]; then
         # Special update handling - pass all arguments
         shift  # Remove "update" from arguments
+        # This script is expanded by the child Bash, not the root entrypoint.
+        # shellcheck disable=SC2016
         exec runuser -u DOCKERUSER -- bash -c '
             export NVM_DIR="$HOME/.nvm"
             if [[ -s "$NVM_DIR/nvm.sh" ]]; then
@@ -283,6 +284,8 @@ else
         '
     else
         # Regular DOCKERUSER execution
+        # This script is expanded by the child Bash, not the root entrypoint.
+        # shellcheck disable=SC2016
         exec runuser -u DOCKERUSER -- bash -c '
             export NVM_DIR="$HOME/.nvm"
             if [[ -s "$NVM_DIR/nvm.sh" ]]; then

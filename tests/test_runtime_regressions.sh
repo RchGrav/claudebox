@@ -147,6 +147,6 @@ ANTHROPIC_API_KEY='' "$BASH" "$SANDBOX/run.sh"
 check 'explicitly empty host API key still overrides the env file' grep -Fxq 'ANTHROPIC_API_KEY=' "$SANDBOX/args"
 
 source "$ROOT_DIR/lib/config.sh"
-check 'DevOps profile retains AWS CLI' bash -c 'case " $(get_profile_packages devops) " in *" awscli "*) exit 0;; *) exit 1;; esac'
+check 'DevOps profile retains AWS CLI' bash -c "case \" \$(get_profile_packages devops) \" in *\" awscli \"*) exit 0;; *) exit 1;; esac"
 printf '\n%d passed; %d failed\n' "$PASSED" "$FAILED"
 [ "$FAILED" -eq 0 ]

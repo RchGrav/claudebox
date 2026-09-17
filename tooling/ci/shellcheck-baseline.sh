@@ -2,16 +2,17 @@
 # Print the full ShellCheck report, fail on every ShellCheck error, and fail
 # when non-error diagnostics exceed the checked-in baseline. This keeps existing
 # debt visible without blocking CI on unrelated warning cleanup.
-set -euo pipefail
+set -Eeuo pipefail
+IFS=$'\n\t'
 
 if [ "$#" -eq 0 ]; then
-  echo "usage: $0 <shell files...>" >&2
+  printf 'usage: %s <shell files...>\n' "$0" >&2
   exit 2
 fi
 
 BASELINE_FILE="${SHELLCHECK_BASELINE:-tooling/ci/shellcheck-baseline.txt}"
 if [ ! -f "$BASELINE_FILE" ]; then
-  echo "ShellCheck baseline not found: $BASELINE_FILE" >&2
+  printf 'ShellCheck baseline not found: %s\n' "$BASELINE_FILE" >&2
   exit 2
 fi
 

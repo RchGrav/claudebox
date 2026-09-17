@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Clipboard opt-in remains a host flag; it must never become a Claude prompt.
-set -euo pipefail
+set -Eeuo pipefail
+IFS=$'\n\t'
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=lib/cli.sh
 source "$ROOT_DIR/lib/cli.sh"
 parse_cli_args --clipboard 'inspect this image'
 process_host_flags
-[[ ${CLAUDEBOX_CLIPBOARD:-false} == true ]] || { echo 'FAIL: clipboard opt-in not recognized'; exit 1; }
+[[ ${CLAUDEBOX_CLIPBOARD:-false} == true ]] || { printf 'FAIL: clipboard opt-in not recognized\n'; exit 1; }
 [[ ${#CLI_PASS_THROUGH[@]} == 1 && ${CLI_PASS_THROUGH[0]} == 'inspect this image' ]]
 printf 'PASS: clipboard is an explicit host-only option\n'
 

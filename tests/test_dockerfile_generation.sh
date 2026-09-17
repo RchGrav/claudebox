@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Run the production generator with BSD/GNU awk and inspect Docker's input.
-set -euo pipefail
+set -Eeuo pipefail
+IFS=$'\n\t'
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if [[ ${1:-} == --child ]]; then
     # shellcheck source=lib/config.sh

@@ -109,11 +109,23 @@ _cmd_info() {
     cecho "📝 Claude Commands" "$WHITE"
     local cmd_count=0
     if [[ -d "$HOME/.claude/commands" ]]; then
-        cmd_count=$(ls -1 "$HOME/.claude/commands"/*.md 2>/dev/null | wc -l)
+        cmd_count=0
+        local counted_path
+        for counted_path in "$HOME/.claude/commands"/*.md; do
+            if [[ -f "$counted_path" ]]; then
+                cmd_count=$((cmd_count + 1))
+            fi
+        done
     fi
     local project_cmd_count=0
     if [[ -e "$PROJECT_PARENT_DIR/commands" ]]; then
-        project_cmd_count=$(ls -1 "$PROJECT_PARENT_DIR/commands"/*.md 2>/dev/null | wc -l)
+        project_cmd_count=0
+        local counted_path
+        for counted_path in "$PROJECT_PARENT_DIR/commands"/*.md; do
+            if [[ -f "$counted_path" ]]; then
+                project_cmd_count=$((project_cmd_count + 1))
+            fi
+        done
     fi
 
     if [[ $cmd_count -gt 0 ]] || [[ $project_cmd_count -gt 0 ]]; then
@@ -171,24 +183,30 @@ _cmd_info() {
 
     cecho "🐳 Docker Status" "$WHITE"
     if [[ -n "${IMAGE_NAME:-}" ]] && docker image inspect "$IMAGE_NAME" &>/dev/null; then
-        local image_info=$(docker images --filter "reference=$IMAGE_NAME" --format "{{.Size}}")
+        local image_info
+        image_info=$(docker images --filter "reference=$IMAGE_NAME" --format "{{.Size}}")
         echo -e "   Image:      ${GREEN}Ready${NC} ($IMAGE_NAME - $image_info)"
 
-        local image_created=$(docker inspect "$IMAGE_NAME" --format '{{.Created}}' | cut -d'T' -f1)
-        local layer_count=$(docker history "$IMAGE_NAME" --no-trunc --format "{{.CreatedBy}}" | wc -l)
+        local image_created
+        image_created=$(docker inspect "$IMAGE_NAME" --format '{{.Created}}' | cut -d'T' -f1)
+        local layer_count
+        layer_count=$(docker history "$IMAGE_NAME" --no-trunc --format "{{.CreatedBy}}" | wc -l)
         echo "   Created:    $image_created"
         echo "   Layers:     $layer_count"
     else
         echo -e "   Image:      ${YELLOW}Not built${NC}"
     fi
 
-    local running_containers=$(docker ps --filter "ancestor=$IMAGE_NAME" -q 2>/dev/null)
+    local running_containers
+    running_containers=$(docker ps --filter "ancestor=$IMAGE_NAME" -q 2>/dev/null)
     if [[ -n "$running_containers" ]]; then
-        local container_count=$(echo "$running_containers" | wc -l)
+        local container_count
+        container_count=$(echo "$running_containers" | wc -l)
         echo -e "   Containers: ${GREEN}$container_count running${NC}"
 
         for container_id in $running_containers; do
-            local container_stats="$(docker stats --no-stream --format "{{.Container}}: {{.CPUPerc}} CPU, {{.MemUsage}}" "$container_id" 2>/dev/null || echo "")"
+            local container_stats
+            container_stats="$(docker stats --no-stream --format "{{.Container}}: {{.CPUPerc}} CPU, {{.MemUsage}}" "$container_id" 2>/dev/null || echo "")"
             if [[ -n "$container_stats" ]]; then
                 echo "               - $container_stats"
             fi
@@ -200,10 +218,18 @@ _cmd_info() {
 
     # All Projects Summary
     cecho "📊 All Projects Summary" "$WHITE"
-    local total_projects=$(ls -1d "$HOME/.claudebox/projects"/*/ 2>/dev/null | wc -l)
+    local total_projects
+    total_projects=0
+    local counted_path
+    for counted_path in "$HOME/.claudebox/projects"/*/; do
+        if [[ -d "$counted_path" ]]; then
+            total_projects=$((total_projects + 1))
+        fi
+    done
     echo "   Projects:   $total_projects total"
 
-    local total_size=$(docker images --filter "reference=claudebox-*" --format "{{.Size}}" | awk '{
+    local total_size
+    total_size=$(docker images --filter "reference=claudebox-*" --format "{{.Size}}" | awk '{
         size=$1; unit=$2;
         if (unit == "GB") size = size * 1024;
         else if (unit == "KB") size = size / 1024;
@@ -212,10 +238,12 @@ _cmd_info() {
         if (total > 1024) printf "%.1fGB", total/1024;
         else printf "%.1fMB", total
     }')
-    local image_count=$(docker images --filter "reference=claudebox-*" -q | wc -l)
+    local image_count
+    image_count=$(docker images --filter "reference=claudebox-*" -q | wc -l)
     echo "   Images:     $image_count ClaudeBox images using $total_size"
 
-    local docker_stats=$(docker system df --format "table {{.Type}}\t{{.Total}}\t{{.Active}}\t{{.Size}}\t{{.Reclaimable}}" 2>/dev/null | tail -n +2)
+    local docker_stats
+    docker_stats=$(docker system df --format "table {{.Type}}\t{{.Total}}\t{{.Active}}\t{{.Size}}\t{{.Reclaimable}}" 2>/dev/null | tail -n +2)
     if [[ -n "$docker_stats" ]]; then
         echo "   System:"
         while IFS=$'\t' read -r type total active size reclaim; do

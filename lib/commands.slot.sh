@@ -6,18 +6,22 @@
 
 _cmd_create() {
     # Debug: Check counter before creation
-    local parent_dir=$(get_parent_dir "$PROJECT_DIR")
-    local counter_before=$(read_counter "$parent_dir")
+    local parent_dir
+    parent_dir=$(get_parent_dir "$PROJECT_DIR")
+    local counter_before
+    counter_before=$(read_counter "$parent_dir")
     if [[ "$VERBOSE" == "true" ]]; then
         echo "[DEBUG] Counter before creation: $counter_before" >&2
     fi
     
     # Create a new slot
-    local slot_name=$(create_container "$PROJECT_DIR")
+    local slot_name
+    slot_name=$(create_container "$PROJECT_DIR")
     local slot_dir="$parent_dir/$slot_name"
     
     # Debug: Check counter after creation
-    local counter_after=$(read_counter "$parent_dir")
+    local counter_after
+    counter_after=$(read_counter "$parent_dir")
     if [[ "$VERBOSE" == "true" ]]; then
         echo "[DEBUG] Counter after creation: $counter_after" >&2
         echo "[DEBUG] Created slot name: $slot_name" >&2
@@ -47,8 +51,10 @@ _cmd_slot() {
     fi
     
     # Get the slot directory
-    local slot_dir=$(get_slot_dir "$PROJECT_DIR" "$slot_num")
-    local slot_name=$(basename "$slot_dir")
+    local slot_dir
+    slot_dir=$(get_slot_dir "$PROJECT_DIR" "$slot_num")
+    local slot_name
+    slot_name=$(basename "$slot_dir")
     
     # Check if slot exists
     if [[ ! -d "$slot_dir" ]]; then
@@ -57,10 +63,12 @@ _cmd_slot() {
     fi
     
     # Set up environment for this specific slot
-    local parent_dir=$(get_parent_dir "$PROJECT_DIR")
+    local parent_dir
+    parent_dir=$(get_parent_dir "$PROJECT_DIR")
     export PROJECT_SLOT_DIR="$slot_dir"
     export PROJECT_PARENT_DIR="$parent_dir"
-    export IMAGE_NAME=$(get_image_name)
+    IMAGE_NAME=$(get_image_name)
+    export IMAGE_NAME
     export CLAUDEBOX_SLOT_NUMBER="$slot_num"
     
     info "Using slot $slot_num: $slot_name"
@@ -70,7 +78,8 @@ _cmd_slot() {
     
     # Now we need to run the container with the slot selected
     # Get parent folder name for container naming
-    local parent_folder_name=$(generate_parent_folder_name "$PROJECT_DIR")
+    local parent_folder_name
+    parent_folder_name=$(generate_parent_folder_name "$PROJECT_DIR")
     local container_name="claudebox-${parent_folder_name}-${slot_name}"
 
     if docker ps --format "{{.Names}}" | grep -q "^${container_name}$"; then
@@ -125,7 +134,7 @@ _cmd_revoke() {
         echo "[DEBUG] max=$max" >&2
     fi
     
-    if [ $max -eq 0 ]; then
+    if [ "$max" -eq 0 ]; then
         echo "No slots to revoke"
         return 0
     fi
@@ -169,8 +178,9 @@ _cmd_revoke() {
         if [[ "$VERBOSE" == "true" ]]; then
             echo "[DEBUG] Starting removal loop" >&2
         fi
-        for ((idx=$max; idx>=1; idx--)); do
-            local name=$(generate_container_name "$PROJECT_DIR" "$idx")
+        for ((idx=max; idx>=1; idx--)); do
+            local name
+            name=$(generate_container_name "$PROJECT_DIR" "$idx")
             local dir="$parent/$name"
             
             if [ -d "$dir" ]; then
@@ -215,13 +225,15 @@ _cmd_revoke() {
         list_project_slots "$PROJECT_DIR"
     else
         # Revoke highest slot only
-        local name=$(generate_container_name "$PROJECT_DIR" "$max")
+        local name
+        name=$(generate_container_name "$PROJECT_DIR" "$max")
         local dir="$parent/$name"
         
         if [ ! -d "$dir" ]; then
             # Slot doesn't exist, just prune the counter
             prune_slot_counter "$PROJECT_DIR"
-            local new_max=$(read_counter "$parent")
+            local new_max
+            new_max=$(read_counter "$parent")
             info "Slot $max doesn't exist. Counter adjusted to $new_max"
         else
             # Check if container is running
@@ -264,14 +276,18 @@ _cmd_kill() {
         
         # Show running containers with their slot hashes
         local found=false
-        local parent=$(get_parent_dir "$PROJECT_DIR")
-        local max=$(read_counter "$parent")
+        local parent
+        parent=$(get_parent_dir "$PROJECT_DIR")
+        local max
+        max=$(read_counter "$parent")
         
         echo "Running containers in this project:"
         echo
         for ((idx=1; idx<=max; idx++)); do
-            local name=$(generate_container_name "$PROJECT_DIR" "$idx")
-            local full_container="claudebox-$(basename "$parent")-${name}"
+            local name
+            name=$(generate_container_name "$PROJECT_DIR" "$idx")
+            local full_container
+            full_container="claudebox-$(basename "$parent")-${name}"
             
             if docker ps --format "{{.Names}}" | grep -q "^${full_container}$"; then
                 printf "  Slot %d: %s\n" "$idx" "$name"
@@ -297,9 +313,12 @@ _cmd_kill() {
     
     # Kill all containers
     if [[ "$target" == "all" ]]; then
-        local parent=$(get_parent_dir "$PROJECT_DIR")
-        local project_name=$(basename "$parent")
-        local containers=$(docker ps --format "{{.Names}}" | grep "^claudebox-${project_name}-" || true)
+        local parent
+        parent=$(get_parent_dir "$PROJECT_DIR")
+        local project_name
+        project_name=$(basename "$parent")
+        local containers
+        containers=$(docker ps --format "{{.Names}}" | grep "^claudebox-${project_name}-" || true)
         
         if [[ -z "$containers" ]]; then
             info "No running containers to kill"
@@ -318,8 +337,10 @@ _cmd_kill() {
     fi
     
     # Kill specific container by slot hash
-    local parent=$(get_parent_dir "$PROJECT_DIR")
-    local project_name=$(basename "$parent")
+    local parent
+    parent=$(get_parent_dir "$PROJECT_DIR")
+    local project_name
+    project_name=$(basename "$parent")
     local full_container="claudebox-${project_name}-${target}"
     
     if docker ps --format "{{.Names}}" | grep -q "^${full_container}$"; then

@@ -6,7 +6,13 @@
 
 _cmd_profiles() {
     # Get current profiles
-    local current_profiles=($(get_current_profiles))
+    local current_profiles=() profile_names profile_name
+    profile_names=$(get_current_profiles)
+    while IFS= read -r profile_name; do
+        if [[ -n "$profile_name" ]]; then
+            current_profiles+=("$profile_name")
+        fi
+    done <<< "$profile_names"
     
     # Show logo first
     logo_small
@@ -14,14 +20,14 @@ _cmd_profiles() {
     
     # Show commands at the top
     printf '%s\n' "Commands:"
-    printf "  ${CYAN}claudebox add <profiles...>${NC}    - Add development profiles to your project\n"
-    printf "  ${CYAN}claudebox remove <profiles...>${NC} - Remove profiles from your project\n"
+    printf '%b' "  ${CYAN}claudebox add <profiles...>${NC}    - Add development profiles to your project\n"
+    printf '%b' "  ${CYAN}claudebox remove <profiles...>${NC} - Remove profiles from your project\n"
     printf '\n'
     
     # Show currently enabled profiles
     if [[ ${#current_profiles[@]} -gt 0 ]]; then
         cecho "Currently enabled:" "$YELLOW"
-        printf "  %s\n" "${current_profiles[*]}"
+        printf '  %s\n' "${current_profiles[*]}"
         printf '\n'
     fi
     
@@ -29,7 +35,8 @@ _cmd_profiles() {
     cecho "Available profiles:" "$CYAN"
     printf '\n'
     for profile in $(get_all_profile_names | tr ' ' '\n' | sort); do
-        local desc=$(get_profile_description "$profile")
+        local desc
+        desc=$(get_profile_description "$profile")
         local is_enabled=false
         # Check if profile is currently enabled (guard for empty array)
         if [ ${#current_profiles[@]} -gt 0 ]; then
@@ -40,13 +47,13 @@ _cmd_profiles() {
                 fi
             done
         fi
-        printf "  ${GREEN}%-15s${NC} " "$profile"
+        printf '  %b%-15s%b ' "$GREEN" "$profile" "$NC"
         if [[ "$is_enabled" == "true" ]]; then
-            printf "${GREEN}✓${NC} "
+            printf '%b' "${GREEN}✓${NC} "
         else
             printf "  "
         fi
-        printf "%s\n" "$desc"
+        printf '%s\n' "$desc"
     done
     printf '\n'
     exit 0
@@ -157,7 +164,8 @@ _cmd_add() {
     
     # If Python profiles were added, remove the pydev flag to trigger reinstall
     if [[ "$python_profiles_added" == "true" ]]; then
-        local parent_dir=$(get_parent_dir "$PROJECT_DIR")
+        local parent_dir
+        parent_dir=$(get_parent_dir "$PROJECT_DIR")
         if [[ -f "$parent_dir/.pydev_flag" ]]; then
             rm -f "$parent_dir/.pydev_flag"
             info "Python packages will be updated on next run"

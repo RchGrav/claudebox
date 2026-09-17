@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 # Optional macOS clipboard bridge. The container launcher owns these processes.
 
+clipboard_bridge_pid_listens_on_port() {
+    local pid="$1"
+    local port="$2"
+
+    command -v lsof >/dev/null 2>&1 || return 1
+    lsof -nP -a -p "$pid" -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1
+}
+
 clipboard_bridge_start() {
     if [[ ${HOST_OS:-} != macOS ]]; then
         printf 'ERROR: --clipboard currently requires macOS.\n' >&2
@@ -37,6 +45,11 @@ clipboard_bridge_start() {
         return 1
     fi
     CLAUDEBOX_CLIPBOARD_PORT=$(python3 -c 'import json,sys; p=json.load(open(sys.argv[1]))["port"]; assert isinstance(p,int) and 0<p<65536; print(p)' "$clipboard_dir/ready.json") || return 1
+    if ! clipboard_bridge_pid_listens_on_port "$clipboard_pid" "$CLAUDEBOX_CLIPBOARD_PORT"; then
+        printf 'ERROR: macOS clipboard bridge ready file did not match the launched server.\n' >&2
+        cat "$clipboard_dir/server.log" >&2
+        return 1
+    fi
     export CLAUDEBOX_CLIPBOARD_PORT
     export CLAUDEBOX_CLIPBOARD_URL="http://host.docker.internal:$CLAUDEBOX_CLIPBOARD_PORT"
 }
@@ -109,4 +122,4 @@ except (OSError, urllib.error.URLError, ValueError):
 PY
 }
 
-export -f clipboard_bridge_start clipboard_bridge_stop clipboard_bridge_probe
+export -f clipboard_bridge_pid_listens_on_port clipboard_bridge_start clipboard_bridge_stop clipboard_bridge_probe

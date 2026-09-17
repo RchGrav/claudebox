@@ -8,10 +8,14 @@ _cmd_clean() {
     case "${1:-}" in
         docker)
             # Check if any ClaudeBox resources exist
-            local containers=$(docker ps -a --filter "label=claudebox.project" -q 2>/dev/null)
-            local cb_containers=$(docker ps -a --format "{{.Names}}" 2>/dev/null | grep "^claudebox-" || true)
-            local images=$(docker images --filter "reference=claudebox*" -q 2>/dev/null)
-            local volumes=$(docker volume ls -q --filter "name=claudebox" 2>/dev/null)
+            local containers
+            containers=$(docker ps -a --filter "label=claudebox.project" -q 2>/dev/null)
+            local cb_containers
+            cb_containers=$(docker ps -a --format "{{.Names}}" 2>/dev/null | grep "^claudebox-" || true)
+            local images
+            images=$(docker images --filter "reference=claudebox*" -q 2>/dev/null)
+            local volumes
+            volumes=$(docker volume ls -q --filter "name=claudebox" 2>/dev/null)
             
             if [[ -z "$containers" ]] && [[ -z "$cb_containers" ]] && [[ -z "$images" ]] && [[ -z "$volumes" ]]; then
                 info "No ClaudeBox Docker resources found"
@@ -55,21 +59,25 @@ _cmd_clean() {
             if [[ -n "$search" ]]; then
                 # Clean specific project by name (using same logic as project/open command)
                 # Convert search to lowercase for case-insensitive matching
-                local search_lower=$(echo "$search" | tr '[:upper:]' '[:lower:]')
+                local search_lower
+                search_lower=$(echo "$search" | tr '[:upper:]' '[:lower:]')
                 local matches=()
                 
                 # Search through all project directories
                 for parent_dir in "$HOME/.claudebox/projects"/*/ ; do
                     [[ -d "$parent_dir" ]] || continue
                     
-                    local dir_name=$(basename "$parent_dir")
-                    local dir_lower=$(echo "$dir_name" | tr '[:upper:]' '[:lower:]')
+                    local dir_name
+                    dir_name=$(basename "$parent_dir")
+                    local dir_lower
+                    dir_lower=$(echo "$dir_name" | tr '[:upper:]' '[:lower:]')
                     
                     # Check if search matches directory name (partial match)
                     if [[ "$dir_lower" == *"$search_lower"* ]]; then
                         # Read the actual project path
                         if [[ -f "$parent_dir/.project_path" ]]; then
-                            local project_path=$(cat "$parent_dir/.project_path")
+                            local project_path
+                            project_path=$(cat "$parent_dir/.project_path")
                             matches+=("$project_path|$dir_name")
                         fi
                     fi
@@ -112,7 +120,8 @@ _cmd_clean() {
                 fi
             else
                 # Clean current project
-                local project_name=$(generate_parent_folder_name "$PROJECT_DIR")
+                local project_name
+                project_name=$(generate_parent_folder_name "$PROJECT_DIR")
                 _clean_project "$project_name" "$PROJECT_DIR"
             fi
             exit 0
@@ -126,7 +135,8 @@ _cmd_clean() {
             for parent_dir in "$HOME/.claudebox/projects"/*/ ; do
                 [[ -d "$parent_dir" ]] || continue
                 
-                local project_name=$(basename "$parent_dir")
+                local project_name
+                project_name=$(basename "$parent_dir")
                 local project_path=""
                 
                 if [[ -f "$parent_dir/.project_path" ]]; then
@@ -179,7 +189,8 @@ _clean_project() {
     local slots_removed=0
     for slot_dir in "$parent_dir"/*/ ; do
         if [[ -d "$slot_dir" ]] && [[ "$slot_dir" != "$parent_dir/" ]]; then
-            local slot_name=$(basename "$slot_dir")
+            local slot_name
+            slot_name=$(basename "$slot_dir")
             # Skip profiles.ini and other project-level files
             if [[ "$slot_name" =~ ^[a-f0-9]{8}$ ]]; then
                 rm -rf "$slot_dir"
@@ -189,7 +200,8 @@ _clean_project() {
     done
     
     # Remove containers for this project
-    local containers=$(docker ps -a --format "{{.Names}}" 2>/dev/null | grep "^claudebox-${project_name}-" || true)
+    local containers
+    containers=$(docker ps -a --format "{{.Names}}" 2>/dev/null | grep "^claudebox-${project_name}-" || true)
     if [[ -n "$containers" ]]; then
         echo "$containers" | xargs -r docker rm -f 2>/dev/null || true
     fi
@@ -216,10 +228,12 @@ _cmd_undo() {
     fi
     
     # Get oldest backup (smallest timestamp)
-    local oldest=$(ls -1 "$backups_dir" | sort -n | head -1)
-    local installed_path=$(which claudebox 2>/dev/null || echo "/usr/local/bin/claudebox")
+    local oldest
+    oldest=$(for backup in "$backups_dir"/*; do printf '%s\n' "${backup##*/}"; done | sort -n | head -1)
+    local installed_path
+    installed_path=$(which claudebox 2>/dev/null || echo "/usr/local/bin/claudebox")
     
-    info "Restoring oldest backup from $(date -d @$oldest '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date -r $oldest '+%Y-%m-%d %H:%M:%S')"
+    info "Restoring oldest backup from $(date -d @"$oldest" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date -r "$oldest" '+%Y-%m-%d %H:%M:%S')"
     
     if [[ -w "$installed_path" ]] || [[ -w "$(dirname "$installed_path")" ]]; then
         cp "$backups_dir/$oldest" "$installed_path"
@@ -240,10 +254,12 @@ _cmd_redo() {
     fi
     
     # Get newest backup (largest timestamp)
-    local newest=$(ls -1 "$backups_dir" | sort -n | tail -1)
-    local installed_path=$(which claudebox 2>/dev/null || echo "/usr/local/bin/claudebox")
+    local newest
+    newest=$(for backup in "$backups_dir"/*; do printf '%s\n' "${backup##*/}"; done | sort -n | tail -1)
+    local installed_path
+    installed_path=$(which claudebox 2>/dev/null || echo "/usr/local/bin/claudebox")
     
-    info "Restoring newest backup from $(date -d @$newest '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date -r $newest '+%Y-%m-%d %H:%M:%S')"
+    info "Restoring newest backup from $(date -d @"$newest" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date -r "$newest" '+%Y-%m-%d %H:%M:%S')"
     
     if [[ -w "$installed_path" ]] || [[ -w "$(dirname "$installed_path")" ]]; then
         cp "$backups_dir/$newest" "$installed_path"

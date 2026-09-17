@@ -17,7 +17,13 @@ install_docker() {
 
     info "Installing Docker..."
 
-    [[ -f /etc/os-release ]] && . /etc/os-release || error "Cannot detect OS"
+    if [[ -f /etc/os-release ]]; then
+        if ! . /etc/os-release; then
+            error "Cannot detect OS"
+        fi
+    else
+        error "Cannot detect OS"
+    fi
 
     case "${ID:-}" in
         ubuntu|debian)
@@ -105,6 +111,21 @@ run_claudebox_container() (
             rm -rf -- "$mcp_temp_dir"
         fi
     }
+    local previous_int_trap previous_term_trap
+    previous_int_trap="$(trap -p INT)"
+    previous_term_trap="$(trap -p TERM)"
+    restore_container_signal_traps() {
+        if [[ -n "$previous_int_trap" ]]; then
+            eval "$previous_int_trap"
+        else
+            trap - INT
+        fi
+        if [[ -n "$previous_term_trap" ]]; then
+            eval "$previous_term_trap"
+        else
+            trap - TERM
+        fi
+    }
     trap cleanup_container_runtime EXIT
     trap 'exit 130' INT
     trap 'exit 143' TERM
@@ -112,9 +133,13 @@ run_claudebox_container() (
     if [[ ${CLAUDEBOX_CLIPBOARD:-false} == true && -z ${CLAUDEBOX_CLIPBOARD_URL:-} ]]; then
         if [[ "$run_mode" == detached ]]; then
             printf 'ERROR: --clipboard requires an interactive or attached session.\n' >&2
+            restore_container_signal_traps
             return 1
         fi
-        clipboard_bridge_start || return 1
+        if ! clipboard_bridge_start; then
+            restore_container_signal_traps
+            return 1
+        fi
     fi
     
     # Handle "attached" mode - start detached, wait, then attach
@@ -134,7 +159,8 @@ run_claudebox_container() (
         
         # Attach to ready container
         docker attach "$container_name"
-        
+
+        restore_container_signal_traps
         return
     fi
     
@@ -192,7 +218,8 @@ run_claudebox_container() (
         tmux_socket_dir=$(dirname "$tmux_socket")
     else
         # Look for existing tmux socket or determine where to create one
-        local uid=$(id -u)
+        local uid
+        uid=$(id -u)
         local default_socket_dir="/tmp/tmux-$uid"
         
         # Check common locations for existing sockets
@@ -257,7 +284,7 @@ run_claudebox_container() (
     docker_args+=(
         -w /workspace
         -v "$PROJECT_DIR":/workspace
-        -v "$PROJECT_PARENT_DIR":/home/$DOCKER_USER/.claudebox
+        -v "$PROJECT_PARENT_DIR:/home/$DOCKER_USER/.claudebox"
     )
     
     # Ensure .claude directory exists
@@ -265,18 +292,18 @@ run_claudebox_container() (
         mkdir -p "$PROJECT_SLOT_DIR/.claude"
     fi
     
-    docker_args+=(-v "$PROJECT_SLOT_DIR/.claude":/home/$DOCKER_USER/.claude)
+    docker_args+=(-v "$PROJECT_SLOT_DIR/.claude:/home/$DOCKER_USER/.claude")
     
     # Mount .claude.json only if it already exists (from previous session)
     if [[ -f "$PROJECT_SLOT_DIR/.claude.json" ]]; then
-        docker_args+=(-v "$PROJECT_SLOT_DIR/.claude.json":/home/$DOCKER_USER/.claude.json)
+        docker_args+=(-v "$PROJECT_SLOT_DIR/.claude.json:/home/$DOCKER_USER/.claude.json")
     fi
     
     # Mount .config directory
-    docker_args+=(-v "$PROJECT_SLOT_DIR/.config":/home/$DOCKER_USER/.config)
+    docker_args+=(-v "$PROJECT_SLOT_DIR/.config:/home/$DOCKER_USER/.config")
     
     # Mount .cache directory
-    docker_args+=(-v "$PROJECT_SLOT_DIR/.cache":/home/$DOCKER_USER/.cache)
+    docker_args+=(-v "$PROJECT_SLOT_DIR/.cache:/home/$DOCKER_USER/.cache")
     
     # The shared project venv must see the same managed Python in every slot.
     # Mount only interpreters so image-provided uv tools remain visible.
@@ -366,7 +393,8 @@ run_claudebox_container() (
         user_mcp_file=$(create_mcp_config_file "$HOME/.claude.json" "") || return 1
         
         if [[ -n "$user_mcp_file" ]]; then
-            local user_count=$(jq '.mcpServers | length' "$user_mcp_file" 2>/dev/null || echo "0")
+            local user_count
+            user_count=$(jq '.mcpServers | length' "$user_mcp_file" 2>/dev/null || echo "0")
             if [[ "$user_count" -gt 0 ]]; then
                 if [[ "$VERBOSE" == "true" ]]; then
                     printf "Found %s user MCP servers\n" "$user_count" >&2
@@ -405,7 +433,8 @@ run_claudebox_container() (
     fi
     
     # Check if we have any project servers
-    local project_count=$(jq '.mcpServers | length' "$temp_project_file" 2>/dev/null || echo "0")
+    local project_count
+    project_count=$(jq '.mcpServers | length' "$temp_project_file" 2>/dev/null || echo "0")
     if [[ "$project_count" -gt 0 ]]; then
         project_mcp_file="$temp_project_file"
         if [[ "$VERBOSE" == "true" ]]; then
@@ -422,14 +451,10 @@ run_claudebox_container() (
     
     
     # Add environment variables
-    local project_name=$(basename "$PROJECT_DIR")
-    local slot_name=$(basename "$PROJECT_SLOT_DIR")
-    
-    # Calculate slot index for hostname
-    local slot_index=1  # default if we can't determine
-    if [[ -n "$PROJECT_PARENT_DIR" ]] && [[ -n "$slot_name" ]]; then
-        slot_index=$(get_slot_index "$slot_name" "$PROJECT_PARENT_DIR" 2>/dev/null || echo "1")
-    fi
+    local project_name
+    project_name=$(basename "$PROJECT_DIR")
+    local slot_name
+    slot_name=$(basename "$PROJECT_SLOT_DIR")
     
     if [[ -n "${ANTHROPIC_API_KEY+x}" ]]; then
         docker_args+=(-e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY")
@@ -492,7 +517,7 @@ run_docker_build() {
     
     docker build \
         $no_cache_flag \
-        --progress=${BUILDKIT_PROGRESS:-auto} \
+        --progress="${BUILDKIT_PROGRESS:-auto}" \
         --build-arg BUILDKIT_INLINE_CACHE=1 \
         --build-arg USER_ID="$USER_ID" \
         --build-arg GROUP_ID="$GROUP_ID" \
