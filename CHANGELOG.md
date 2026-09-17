@@ -7,22 +7,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [2.0.1] - 2026-09-15
 
 ### Fixed
+- **Firewall startup**: Unresolvable allowed domains no longer leave default
+  policies open, and failed firewall setup stops session startup.
+- **Slot selection**: Explicit slot numbers are validated independently of idle
+  slot availability. Selecting a running slot attaches to its existing container.
 - **Bash 3.2 / `set -u`**: Fresh installs on macOS aborted with
   `lib/cli.sh: line 22: all_args[@]: unbound variable`. Empty array
   expansions are now guarded across the CLI, config, docker, and profile
   modules, and `readarray` is gone. Fixes #71, #90. (#89, TonyHernandezAtMS)
 - **Entrypoint**: `local` used outside a function made containers exit on
   start once Python profiles were enabled. Fixes #65. (#100, b00y0h)
-- **Python profiles**: uv-managed Python is now persisted by mounting
-  `~/.local/share`, so `python3` survives container restarts. Fixes #87.
+- **Python profiles**: uv-managed Python is persisted in a shared project
+  interpreter directory, so `python3` survives restarts and slot changes. Fixes #87.
   (#88, TonyHernandezAtMS)
-- **javascript profile**: nvm directory is chowned to the container user
-  before `npm install -g`, fixing EACCES during build. (#102, b00y0h)
+- **javascript profile**: Additional npm tools are installed as the container
+  user using the existing Node installation, fixing EACCES during build. (#102, b00y0h)
 - **devops profile**: kubectl, helm, and terraform are installed from
   upstream releases since Debian bookworm has no packages for them.
   (#101, b00y0h)
+- **macOS command syncing**: Use the built-in `shasum` when GNU `sha256sum`
+  is unavailable. Fixes #28.
+- **Saved flags**: Starting without arguments works with saved flags on Bash 3.2.
+- **Temporary files**: MCP and Dockerfile cleanup preserves caller traps and
+  removes intermediate files on success and failure.
 
 ### Added
+- Opt-in macOS clipboard bridge (`--clipboard`) for image paste and text copy,
+  with per-session authentication and cleanup. Requires host Python 3.
 - `tests/test_cli_bash32.sh` drives `main.sh` end to end under real
   Bash 3.2 and fails on any unbound variable; `test_in_bash32_docker.sh`
   now exits non-zero on failure.

@@ -146,6 +146,7 @@ show_help() {
         echo "Options:"
         echo "  -h, --help                      Display help for command"
         echo "  --verbose                        Show detailed output"
+        echo "  --clipboard                      Enable macOS image paste and text copy"
         echo "  --enable-sudo                    Enable sudo without password"
         echo "  --disable-firewall               Disable network restrictions"
         echo
@@ -174,6 +175,7 @@ show_help() {
         echo "Options:"
         echo "  -h, --help                      Display help for command"
         echo "  --verbose                        Show detailed output"
+        echo "  --clipboard                      Enable macOS image paste and text copy"
         echo "  --enable-sudo                    Enable sudo without password"
         echo "  --disable-firewall               Disable network restrictions"
         echo
@@ -221,6 +223,7 @@ show_full_help() {
             sed '1s/claude/claudebox/g' | \
             sed '/^Commands:/i\
   --verbose                        Show detailed output\
+  --clipboard                      Enable macOS image paste and text copy\
   --enable-sudo                    Enable sudo without password\
   --disable-firewall               Disable network restrictions\
 ' | \

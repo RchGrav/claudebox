@@ -97,11 +97,36 @@ run_claudebox_container() (
     local run_mode="$2"  # "interactive", "detached", "pipe", or "attached"
     shift 2
     local container_args=("$@")
+
+    # These resources are scoped by the subshell, not function-local bindings:
+    # Bash 3.2 can unwind locals before an EXIT trap on an errexit path.
+    clipboard_pid="" clipboard_dir="" mcp_temp_dir=""
+    # Invoked indirectly by EXIT; older ShellCheck versions miss trap reachability.
+    # shellcheck disable=SC2317
+    cleanup_container_runtime() {
+        if [[ -n "$clipboard_pid" || -n "$clipboard_dir" ]]; then
+            clipboard_bridge_stop
+        fi
+        if [[ -n "$mcp_temp_dir" ]]; then
+            rm -rf -- "$mcp_temp_dir"
+        fi
+    }
+    trap cleanup_container_runtime EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+
+    if [[ ${CLAUDEBOX_CLIPBOARD:-false} == true && -z ${CLAUDEBOX_CLIPBOARD_URL:-} ]]; then
+        if [[ "$run_mode" == detached ]]; then
+            printf 'ERROR: --clipboard requires an interactive or attached session.\n' >&2
+            return 1
+        fi
+        clipboard_bridge_start || return 1
+    fi
     
     # Handle "attached" mode - start detached, wait, then attach
     if [[ "$run_mode" == "attached" ]]; then
         # Start detached
-        run_claudebox_container "$container_name" "detached" "${container_args[@]}" >/dev/null
+        run_claudebox_container "$container_name" "detached" ${container_args[@]+"${container_args[@]}"} >/dev/null
         
         # Show progress while container initializes
         fillbar
@@ -120,6 +145,19 @@ run_claudebox_container() (
     fi
     
     local docker_args=()
+
+    if [[ ${CLAUDEBOX_CLIPBOARD:-false} == true ]]; then
+        local clipboard_command
+        for clipboard_command in xclip xsel wl-paste wl-copy; do
+            docker_args+=(-v "${CLAUDEBOX_SCRIPT_DIR}/build/clipboard-client.js:/opt/claudebox-clipboard/$clipboard_command:ro")
+        done
+        docker_args+=(
+            -e "CLAUDEBOX_CLIPBOARD_URL=$CLAUDEBOX_CLIPBOARD_URL"
+            -e "CLAUDEBOX_CLIPBOARD_TOKEN=$CLAUDEBOX_CLIPBOARD_TOKEN"
+            -e "CLAUDEBOX_CLIPBOARD_PORT=$CLAUDEBOX_CLIPBOARD_PORT"
+            -e "DISPLAY=${DISPLAY:-:0}"
+        )
+    fi
     
     # Set run mode
     case "$run_mode" in
@@ -297,6 +335,10 @@ run_claudebox_container() (
         exit 1
     fi
     
+    # Keep temporary configuration and its EXIT trap inside this invocation's
+    # subshell. The caller's traps survive, and local paths remain in scope on exit.
+    mcp_temp_dir=$(mktemp -d "${TMPDIR:-/tmp}/claudebox-mcp.XXXXXX") || return 1
+
     # Helper function to create and merge MCP config files
     create_mcp_config_file() {
         local config_file="$1"
@@ -304,18 +346,17 @@ run_claudebox_container() (
         
         # Create temporary file with unique name
         local mcp_file
-        mcp_file=$(mktemp "/tmp/claudebox-mcp-$(date +%s)-$$.json" 2>/dev/null || mktemp)
-        mcp_temp_files+=("$mcp_file")
+        mcp_file=$(mktemp "$mcp_temp_dir/config.XXXXXX") || return 1
         
         # Extract mcpServers if they exist
         if [[ -f "$config_file" ]] && jq -e '.mcpServers' "$config_file" >/dev/null 2>&1; then
             if [[ -f "$temp_file" ]]; then
                 # Merge with existing temp file
                 jq -s '.[0].mcpServers * .[1].mcpServers | {mcpServers: .}' \
-                    "$temp_file" "$config_file" > "$mcp_file" 2>/dev/null
+                    "$temp_file" "$config_file" > "$mcp_file" || return 1
             else
                 # Create new config file
-                jq '{mcpServers: .mcpServers}' "$config_file" > "$mcp_file" 2>/dev/null
+                jq '{mcpServers: .mcpServers}' "$config_file" > "$mcp_file" || return 1
             fi
             printf "%s" "$mcp_file"
         else
@@ -327,34 +368,9 @@ run_claudebox_container() (
     local user_mcp_file=""
     local project_mcp_file=""
     
-    # Track all temporary MCP files for cleanup
-    declare -a mcp_temp_files=()
-    
-    # Set up cleanup trap for temporary MCP config files
-    # Invoked by the EXIT trap in this subshell; exercised by test_runtime_regressions.sh.
-    # shellcheck disable=SC2317
-    cleanup_mcp_files() {
-        local file
-        # Check if array exists and has elements (set -u safe)
-        if [[ -n "${mcp_temp_files+set}" ]] && [ ${#mcp_temp_files[@]} -gt 0 ]; then
-            for file in "${mcp_temp_files[@]}"; do
-                if [[ -f "$file" ]]; then
-                    rm -f "$file"
-                fi
-            done
-        fi
-        if [[ -n "${user_mcp_file:-}" ]] && [[ -f "$user_mcp_file" ]]; then
-            rm -f "$user_mcp_file"
-        fi
-        if [[ -n "${project_mcp_file:-}" ]] && [[ -f "$project_mcp_file" ]]; then
-            rm -f "$project_mcp_file"
-        fi
-    }
-    trap cleanup_mcp_files EXIT
-    
     # Create user MCP config file from ~/.claude.json
     if [[ -f "$HOME/.claude.json" ]]; then
-        user_mcp_file=$(create_mcp_config_file "$HOME/.claude.json" "")
+        user_mcp_file=$(create_mcp_config_file "$HOME/.claude.json" "") || return 1
         
         if [[ -n "$user_mcp_file" ]]; then
             local user_count
@@ -376,15 +392,13 @@ run_claudebox_container() (
     
     # Create project MCP config file by merging project configs
     # Start with empty config file for merging
-    local temp_project_file
-    temp_project_file=$(mktemp "/tmp/claudebox-project-temp-$(date +%s)-$$.json" 2>/dev/null || mktemp)
-    mcp_temp_files+=("$temp_project_file")
+    local temp_project_file="$mcp_temp_dir/project.json"
     echo '{"mcpServers":{}}' > "$temp_project_file"
     
     # Merge shared project settings first
     local merged_file=""
     if [[ -f "$PROJECT_DIR/.claude/settings.json" ]]; then
-        merged_file=$(create_mcp_config_file "$PROJECT_DIR/.claude/settings.json" "$temp_project_file")
+        merged_file=$(create_mcp_config_file "$PROJECT_DIR/.claude/settings.json" "$temp_project_file") || return 1
         if [[ -n "$merged_file" ]]; then
             mv "$merged_file" "$temp_project_file"
         fi
@@ -392,7 +406,7 @@ run_claudebox_container() (
     
     # Merge local project settings (highest priority)
     if [[ -f "$PROJECT_DIR/.claude/settings.local.json" ]]; then
-        merged_file=$(create_mcp_config_file "$PROJECT_DIR/.claude/settings.local.json" "$temp_project_file")
+        merged_file=$(create_mcp_config_file "$PROJECT_DIR/.claude/settings.local.json" "$temp_project_file") || return 1
         if [[ -n "$merged_file" ]]; then
             mv "$merged_file" "$temp_project_file"
         fi
@@ -446,7 +460,7 @@ run_claudebox_container() (
     
     # Run the container
     if [[ "$VERBOSE" == "true" ]]; then
-        echo "[DEBUG] Docker run command: docker run ${docker_args[*]}" >&2
+        printf '[DEBUG] Starting Docker image %s (mode %s)\n' "$IMAGE_NAME" "$run_mode" >&2
     fi
     docker run "${docker_args[@]}"
     local exit_code=$?

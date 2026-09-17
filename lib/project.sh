@@ -504,6 +504,24 @@ get_slot_index() {
 }
 
 # Sync commands from bundled and user sources to project
+command_directory_checksum() {
+    local source_dir="$1"
+    local manifest=""
+    local file digest
+
+    if [[ ! -d "$source_dir" ]]; then
+        echo ""
+        return 0
+    fi
+
+    while IFS= read -r file; do
+        digest=$(sha256_file - < "$source_dir/${file#./}") || return 1
+        manifest+="${digest}  ${file#./}"$'\n'
+    done < <(cd "$source_dir" && find . -type f | LC_ALL=C sort)
+
+    sha256_string "$manifest"
+}
+
 sync_commands_to_project() {
     local project_parent="$1"
     local commands_dir="$project_parent/commands"
@@ -523,13 +541,12 @@ sync_commands_to_project() {
     
     # Get checksum of cbox commands if directory exists
     if [[ -d "$cbox_source" ]]; then
-        # Find all files, get their content checksum, sort for consistency
-        cbox_checksum=$(find "$cbox_source" -type f -exec sha256sum {} \; 2>/dev/null | sort | sha256sum | cut -d' ' -f1)
+        cbox_checksum=$(command_directory_checksum "$cbox_source")
     fi
     
     # Get checksum of user commands if directory exists
     if [[ -d "$user_source" ]]; then
-        user_checksum=$(find "$user_source" -type f -exec sha256sum {} \; 2>/dev/null | sort | sha256sum | cut -d' ' -f1)
+        user_checksum=$(command_directory_checksum "$user_source")
     fi
     
     # Check if cbox commands need syncing
@@ -632,4 +649,4 @@ export -f create_container determine_next_start_container find_ready_slot find_i
 export -f get_project_folder_name get_image_name _get_project_slug
 export -f get_project_by_path list_all_projects resolve_project_path
 export -f list_project_slots get_slot_dir get_slot_index prune_slot_counter
-export -f sync_commands_to_project
+export -f command_directory_checksum sync_commands_to_project

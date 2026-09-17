@@ -103,6 +103,10 @@ check_profile_file() {
 "$BASH" "$MAIN" help >/dev/null 2>&1 </dev/null || true
 
 run_case "no arguments"        no
+mkdir -p "$HOME/.claudebox"
+printf '%s\n' '--verbose' > "$HOME/.claudebox/default-flags"
+run_case "no arguments with saved flags" no
+rm "$HOME/.claudebox/default-flags"
 run_case "help"                yes help
 run_case "profiles"            yes profiles
 run_case "--verbose profiles"  yes --verbose profiles
