@@ -343,15 +343,27 @@ def create_server(
 ):
     if not token:
         raise ValueError("clipboard token is required")
+    max_payload_bytes = int(max_payload_bytes)
+    max_text_bytes = int(max_text_bytes)
+    max_workers = int(max_workers)
+    socket_timeout = float(socket_timeout)
+    if max_payload_bytes < 1:
+        raise ValueError("max_payload_bytes must be at least 1")
+    if max_text_bytes < 1:
+        raise ValueError("max_text_bytes must be at least 1")
+    if max_workers < 1:
+        raise ValueError("max_workers must be at least 1")
+    if socket_timeout <= 0:
+        raise ValueError("socket_timeout must be greater than 0")
 
     server = ClipboardHTTPServer((host, int(port)), ClipboardRequestHandler)
     server.clipboard_token = token
     server.image_provider = image_provider
     server.text_writer = text_writer or write_macos_text
-    server.max_payload_bytes = int(max_payload_bytes)
-    server.max_text_bytes = int(max_text_bytes)
-    server.max_workers = int(max_workers)
-    server.socket_timeout = float(socket_timeout)
+    server.max_payload_bytes = max_payload_bytes
+    server.max_text_bytes = max_text_bytes
+    server.max_workers = max_workers
+    server.socket_timeout = socket_timeout
     server.worker_semaphore = threading.BoundedSemaphore(value=server.max_workers)
     server.clipboard_semaphore = threading.BoundedSemaphore(value=2)
     return server

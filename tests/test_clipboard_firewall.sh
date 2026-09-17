@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
+IFS=$'\n\t'
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/claudebox-clipboard-firewall.XXXXXX")
 trap 'rm -rf -- "$TEST_ROOT"' EXIT
@@ -8,7 +9,15 @@ eval "$(sed -n '/^allow_clipboard_bridge()/,/^}/p' "$ROOT_DIR/build/init-firewal
 # shellcheck disable=SC2317,SC2329
 getent() { printf '192.168.5.2 STREAM host.docker.internal\n192.168.5.2 DGRAM\n'; }
 # shellcheck disable=SC2317,SC2329
-iptables() { printf '%s\n' "$*" >> "$TEST_ROOT/rules"; }
+iptables() {
+    local args="$1"
+    shift || true
+    while [ "$#" -gt 0 ]; do
+        args="$args $1"
+        shift
+    done
+    printf '%s\n' "$args" >> "$TEST_ROOT/rules"
+}
 export CLAUDEBOX_CLIPBOARD_URL="" CLAUDEBOX_CLIPBOARD_TOKEN="" CLAUDEBOX_CLIPBOARD_PORT=""
 allow_clipboard_bridge
 [[ ! -e "$TEST_ROOT/rules" ]]
@@ -27,8 +36,17 @@ printf 'PASS: clipboard firewall access is limited to one host TCP port and opt-
 export ROOT_DIR TEST_ROOT
 # shellcheck disable=SC2016
 "$BASH" -c '
-    set -euo pipefail
-    iptables() { printf "%s\n" "$*" >> "$TEST_ROOT/full-rules"; }
+    set -Eeuo pipefail
+    IFS=$'"'"'\n\t'"'"'
+    iptables() {
+        local args="$1"
+        shift || true
+        while [ "$#" -gt 0 ]; do
+            args="$args $1"
+            shift
+        done
+        printf "%s\n" "$args" >> "$TEST_ROOT/full-rules"
+    }
     ipset() { :; }
     getent() { return 2; }
     rm() { :; }

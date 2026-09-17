@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Regression coverage for portable command sync checksums.
-set -euo pipefail
+set -Eeuo pipefail
+IFS=$'\n\t'
 
 TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$TEST_DIR")"

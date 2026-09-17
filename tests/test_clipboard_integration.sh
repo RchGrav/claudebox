@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Real macOS clipboard bridge integration using a private named NSPasteboard.
-set -euo pipefail
+set -Eeuo pipefail
+IFS=$'\n\t'
 
 TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$TEST_DIR")"

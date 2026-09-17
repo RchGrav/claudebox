@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Exercise host-side Docker argument construction and MCP file lifetime.
-set -euo pipefail
+set -Eeuo pipefail
+IFS=$'\n\t'
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if [[ ${1:-} == --child ]]; then
