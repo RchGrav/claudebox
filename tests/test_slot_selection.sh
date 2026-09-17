@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Guards slot selection preflight. An explicit slot command should validate the
 # requested slot, not depend on the default "next inactive slot" selector.
-set -uo pipefail
+set -Eeuo pipefail
+IFS=$'\n\t'
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/claudebox-slot-selection.XXXXXX")"
@@ -39,6 +40,7 @@ chmod +x "$HOME/.local/bin/docker"
 setup_claude_agent_command() { :; }
 logo_small() { :; }
 cecho() { printf '%s\n' "$1"; }
+info() { :; }
 show_no_slots_menu() { printf '%s\n' "No available slots found"; return 1; }
 error() { printf '%s\n' "$1"; return 1; }
 check_docker() { return 0; }
@@ -46,7 +48,15 @@ needs_docker_rebuild() { return 1; }
 setup_shared_commands() { :; }
 build_docker_image() { :; }
 run_claudebox_container() {
-    printf 'run:%s:%s:%s\n' "$1" "$2" "$*"
+    local container_name="$1"
+    local mode="$2"
+    local all_args="$1 $2"
+    shift 2
+    while [ "$#" -gt 0 ]; do
+        all_args="$all_args $1"
+        shift
+    done
+    printf 'run:%s:%s:%s\n' "$container_name" "$mode" "$all_args"
 }
 docker_attach_status=0
 export DOCKER_ATTACH_STATUS=0
@@ -70,6 +80,8 @@ docker() {
     return 0
 }
 
+# shellcheck disable=SC1091
+source "$ROOT_DIR/lib/os.sh"
 # shellcheck disable=SC1091
 source "$ROOT_DIR/lib/project.sh"
 # shellcheck disable=SC1091

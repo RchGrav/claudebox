@@ -2,19 +2,20 @@
 # Build the ClaudeBox self-extracting installer script
 # Packages entire repo for extraction to ~/.claudebox/
 
-set -euo pipefail
+set -Eeuo pipefail
+IFS=$'\n\t'
 
 # Get version from main.sh
 VERSION=$(grep -m1 'readonly CLAUDEBOX_VERSION=' main.sh | cut -d'"' -f2)
 if [[ -z "$VERSION" ]]; then
-  echo "❌ Could not extract version from main.sh" >&2
+  printf '❌ Could not extract version from main.sh\n' >&2
   exit 1
 fi
 
-echo "🔨 Building ClaudeBox v$VERSION"
+printf '🔨 Building ClaudeBox v%s\n' "$VERSION"
 
 # Clean dist directory
-echo "🧹 Cleaning dist directory..."
+printf '🧹 Cleaning dist directory...\n'
 rm -rf dist
 mkdir -p dist
 
@@ -26,7 +27,7 @@ ARCHIVE="dist/claudebox-${VERSION}.tar.gz"
 TEMP_ARCHIVE="/tmp/claudebox_archive_$$.tar.gz"
 
 # Create archive of entire repo (excluding hidden files and build output)
-echo "📦 Creating archive..."
+printf '📦 Creating archive...\n'
 tar -czf "$TEMP_ARCHIVE" \
   --exclude='.git' \
   --exclude='.gitignore' \
@@ -53,7 +54,7 @@ tar -czf "$TEMP_ARCHIVE" \
 mv "$TEMP_ARCHIVE" "$ARCHIVE"
 
 if tar -tzf "$ARCHIVE" | grep -E '^\./\.(omx|agents|codex)(/|$)' >/dev/null; then
-  echo "❌ Archive includes local runtime state" >&2
+  printf '❌ Archive includes local runtime state\n' >&2
   exit 1
 fi
 
@@ -63,22 +64,22 @@ if command -v sha256sum >/dev/null 2>&1; then
 elif command -v shasum >/dev/null 2>&1; then
   SHA256=$(shasum -a 256 "$ARCHIVE" | awk '{print $1}')
 else
-  echo "❌ sha256sum or shasum required" >&2
+  printf '❌ sha256sum or shasum required\n' >&2
   exit 1
 fi
 
 # Create final script with SHA256 embedded
-echo "🔧 Assembling $OUTPUT..."
+printf '🔧 Assembling %s...\n' "$OUTPUT"
 sed "s/__ARCHIVE_SHA256__/$SHA256/g" "$TEMPLATE" > "$OUTPUT"
 cat "$ARCHIVE" >> "$OUTPUT"
 chmod +x "$OUTPUT"
 
 # Keep the archive (don't delete it)
 
-echo "✅ Files created:"
-echo "   📦 Installer: $OUTPUT ($(wc -c < "$OUTPUT" | tr -d ' ') bytes)"
-echo "   📄 Archive: $ARCHIVE ($(wc -c < "$ARCHIVE" | tr -d ' ') bytes)"
-echo "   🔐 SHA256: $SHA256"
+printf '✅ Files created:\n'
+printf '   📦 Installer: %s (%s bytes)\n' "$OUTPUT" "$(wc -c < "$OUTPUT" | tr -d ' ')"
+printf '   📄 Archive: %s (%s bytes)\n' "$ARCHIVE" "$(wc -c < "$ARCHIVE" | tr -d ' ')"
+printf '   🔐 SHA256: %s\n' "$SHA256"
 
 # Create a symlink from the root for backward compatibility
 ln -sf "$OUTPUT" claudebox.run
