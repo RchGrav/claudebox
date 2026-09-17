@@ -166,7 +166,8 @@ class ClipboardRequestHandler(http.server.BaseHTTPRequestHandler):
 
         try:
             self.server.text_writer(text)
-        except Exception:
+        except Exception as exc:
+            print(f"clipboard text write failed: {exc}", file=sys.stderr)
             self._send_empty(500)
             return
 
@@ -178,7 +179,8 @@ class ClipboardRequestHandler(http.server.BaseHTTPRequestHandler):
             return None
         try:
             data = self.server.image_provider()
-        except Exception:
+        except Exception as exc:
+            print(f"clipboard image read failed: {exc}", file=sys.stderr)
             return None
         finally:
             self.server.clipboard_semaphore.release()
@@ -205,12 +207,15 @@ def read_macos_png(pasteboard_name=None, max_payload_bytes=DEFAULT_MAX_PAYLOAD_B
     proc = subprocess.run(
         ["osascript", "-l", "JavaScript", "-e", script],
         stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
         timeout=5,
         env=env,
         check=False,
     )
     if proc.returncode != 0:
+        message = _decode_subprocess_stderr(proc.stderr)
+        if message:
+            print(f"osascript image read failed: {message}", file=sys.stderr)
         return None
 
     encoded = proc.stdout.strip()
@@ -276,6 +281,12 @@ if (result) {
 """
 
 
+def _decode_subprocess_stderr(data):
+    if not data:
+        return ""
+    return data.decode("utf-8", errors="replace").strip()
+
+
 def write_macos_text(text, pasteboard_name=None):
     script = _write_macos_text_script()
     env = os.environ.copy()
@@ -288,12 +299,15 @@ def write_macos_text(text, pasteboard_name=None):
         ["osascript", "-l", "JavaScript", "-e", script],
         input=text.encode("utf-8"),
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
         timeout=5,
         env=env,
         check=False,
     )
     if proc.returncode != 0:
+        message = _decode_subprocess_stderr(proc.stderr)
+        if message:
+            raise RuntimeError(f"failed to write macOS clipboard text: {message}")
         raise RuntimeError("failed to write macOS clipboard text")
 
 

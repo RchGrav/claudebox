@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Real Docker integration coverage for production entrypoint mount behavior.
-set -euo pipefail
+set -Eeuo pipefail
+IFS=$'\n\t'
 
 TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$TEST_DIR")"
@@ -220,7 +221,7 @@ docker_probe() {
 venv_python_target() {
     local slot="$1"
 
-    docker_probe "$slot" "target-$RANDOM" 'readlink -f /home/claude/.claudebox/.venv/bin/python'
+    docker_probe "$slot" "target-$RANDOM" '/home/claude/.claudebox/.venv/bin/python -c "import os, sys; print(os.path.realpath(sys.executable))"'
 }
 
 assert_venv_works_with_slot() {
