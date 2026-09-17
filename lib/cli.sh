@@ -7,9 +7,9 @@
 # ============================================================================
 
 # Four flag buckets (Bash 3.2 compatible - no associative arrays)
-readonly HOST_ONLY_FLAGS=(--verbose --clipboard rebuild)
+readonly HOST_ONLY_FLAGS=(--verbose --clipboard)
 readonly CONTROL_FLAGS=(--enable-sudo --disable-firewall)
-readonly SCRIPT_COMMANDS=(shell create slot slots revoke profiles projects profile info help -h --help add remove install allowlist clean save project tmux kill)
+readonly SCRIPT_COMMANDS=(shell create slot slots revoke profiles projects profile info help -h --help add remove install allowlist clean save project tmux kill rebuild)
 
 cli_array_contains() {
     local needle="$1"
@@ -81,9 +81,6 @@ process_host_flags() {
                     ;;
                 --clipboard)
                     export CLAUDEBOX_CLIPBOARD=true
-                    ;;
-                rebuild)
-                    export REBUILD=true
                     ;;
                 tmux)
                     export CLAUDEBOX_WRAP_TMUX=true
