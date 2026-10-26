@@ -118,6 +118,17 @@ read_config_value() {
     ' "$config_file"
 }
 
+# Return 0 if $1 is a plain apt package spec: name[:arch][=version|/release].
+# These go into a root RUN line, so this allowlist keeps shell metacharacters
+# and apt options out of the generated Dockerfile.
+is_valid_apt_package() {
+    local re='^[[:lower:][:digit:]][[:lower:][:digit:]+.-]*(:[[:lower:][:digit:]-]+)?(=[[:digit:]][[:alnum:].+~:-]*|/[[:alnum:].-]+)?$'
+    if [[ "$1" =~ $re ]]; then
+        return 0
+    fi
+    return 1
+}
+
 read_profile_section() {
     local profile_file="$1"
     local section="$2"

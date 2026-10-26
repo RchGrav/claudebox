@@ -569,7 +569,26 @@ build_docker_image() {
                 fi
             done
         fi
-        
+
+        # Extra apt packages added with `claudebox install`
+        local extra_packages=()
+        while IFS= read -r line; do
+            line=$(printf '%s' "$line" | tr -d '[:space:]')
+            if [[ -n "$line" ]]; then
+                if ! is_valid_apt_package "$line"; then
+                    error "Invalid package name in [packages] of $profiles_file: $line"
+                fi
+                extra_packages+=("$line")
+            fi
+        done < <(read_profile_section "$profiles_file" "packages")
+
+        if [[ ${#extra_packages[@]} -gt 0 ]]; then
+            local package_list
+            package_list=$(printf '%s ' "${extra_packages[@]}")
+            profile_installations+=$'\n'"USER root"
+            profile_installations+=$'\n'"RUN export DEBIAN_FRONTEND=noninteractive && apt-get update && apt-get install -y ${package_list% } && apt-get clean && rm -rf /var/lib/apt/lists/*"
+        fi
+
         # Calculate hash only for Docker-affecting profiles
         local docker_profiles=()
         local python_only_profiles=("python" "ml" "datascience")

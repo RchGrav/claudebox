@@ -318,6 +318,13 @@ _cmd_remove() {
 _cmd_install() {
     [[ $# -eq 0 ]] && error "No packages specified. Usage: claudebox install <package1> <package2> ..."
 
+    local pkg
+    for pkg in "$@"; do
+        if ! is_valid_apt_package "$pkg"; then
+            error "Invalid package name: $pkg"
+        fi
+    done
+
     local profile_file
     profile_file=$(get_profile_file_path)
 
