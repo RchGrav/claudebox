@@ -10,6 +10,7 @@ cat > "$SANDBOX/bin/curl" <<'STUB'
 #!/bin/sh
 case "$*" in
     *get-helm-3*) exit 22 ;;
+    *sh.rustup.rs*) exit 22 ;;
     *stable.txt*) printf 'v1.31.0\n' ;;
 esac
 STUB
@@ -30,3 +31,12 @@ if [ "$status" -ne 22 ]; then
     exit 1
 fi
 printf 'PASS: Helm download failure stops the generated Docker RUN instruction\n'
+
+command_text="$(get_profile_rust | sed -n 's/^RUN //p')"
+status=0
+PATH="$SANDBOX/bin:$PATH" /bin/sh -c "$command_text" </dev/null || status=$?
+if [ "$status" -ne 22 ]; then
+    printf 'FAIL: rustup download failure returned %s instead of 22\n' "$status"
+    exit 1
+fi
+printf 'PASS: rustup download failure stops the generated Docker RUN instruction\n'
