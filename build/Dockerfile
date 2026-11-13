@@ -20,7 +20,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg]" \
     "https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null && apt-get update && \
         apt-get install -y --no-autoremove --no-install-recommends apt-utils wget zsh fzf ca-certificates sudo git tmux iptables ipset gh zip unzip jq \
-        procps vim nano less iputils-ping traceroute dnsutils netcat-openbsd net-tools xdg-utils
+        procps vim nano less iputils-ping traceroute dnsutils netcat-openbsd net-tools xdg-utils libatomic1
 
 ENV LANG=en_US.UTF-8 \
     LANGUAGE=en_US:en \
